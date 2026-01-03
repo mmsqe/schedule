@@ -945,10 +945,19 @@
                 <button class="modal-close" onclick="closeShareModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <p style="margin-bottom: 15px; color: #666;">Anyone with this link can view your schedule:</p>
-                <div style="display: flex; gap: 10px;">
-                    <input type="text" id="shareUrl" readonly style="flex: 1; font-size: 0.85rem;">
-                    <button class="btn btn-primary" onclick="copyShareUrl()">Copy</button>
+                <div class="form-group">
+                    <label style="color: #2e7d32; font-weight: 600;">Edit Access (can modify)</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" id="shareUrlEdit" readonly style="flex: 1; font-size: 0.85rem;">
+                        <button class="btn btn-primary" onclick="copyShareUrl('edit')">Copy</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label style="color: #1976d2; font-weight: 600;">View Only (read-only)</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" id="shareUrlView" readonly style="flex: 1; font-size: 0.85rem;">
+                        <button class="btn btn-secondary" onclick="copyShareUrl('view')">Copy</button>
+                    </div>
                 </div>
                 <p id="copyStatus" style="margin-top: 10px; color: #27ae60; font-size: 0.85rem; display: none;">Link copied to clipboard!</p>
             </div>
@@ -1022,6 +1031,8 @@
             editingEventId: null,
             copiedEvent: null,
             syncRoomId: null,
+            editKey: null,
+            viewOnly: true,  // Default to view-only for safety
             events: {
                 monday: [],
                 tuesday: [],
@@ -1069,13 +1080,14 @@
         }
 
         function syncToFirebase() {
-            if (!state.syncRoomId) return;
+            if (!state.syncRoomId || state.viewOnly) return;
 
             const dataToSync = {
                 events: state.events,
                 startHour: state.startHour,
                 endHour: state.endHour,
                 showWeekends: state.showWeekends,
+                editKey: state.editKey,
                 lastUpdated: Date.now()
             };
 
@@ -1138,8 +1150,13 @@
             const roomCode = params.get('room');
             if (roomCode) {
                 joiningFromUrl = true;
+                // Check for edit key - if valid, allow editing
+                const editKey = params.get('key');
+                state.editKey = editKey || null;
+                // Default to view-only, will verify key after joining
+                state.viewOnly = true;
                 // Will join room after init completes
-                setTimeout(() => joinRoom(roomCode.toUpperCase(), false), 100);
+                setTimeout(() => joinRoom(roomCode.toUpperCase(), false, editKey), 100);
                 return true;
             }
 
@@ -1182,15 +1199,42 @@
         init();
 
         function init() {
-            // Load from URL first (shared link), otherwise from localStorage
-            if (!loadFromUrl()) {
-                loadState();
+            // Always load localStorage first (for local events)
+            loadState();
+
+            // Then check URL for room/key
+            const fromUrl = loadFromUrl();
+            if (!fromUrl) {
+                // Not joining from URL, allow editing by default
+                state.viewOnly = false;
             }
             renderCalendar();
             setupEventListeners();
             setActiveDay();
             // Auto-reconnect to Firebase sync room if previously connected
             autoReconnectSync();
+            // Update UI for view-only mode
+            updateViewOnlyUI();
+        }
+
+        function updateViewOnlyUI() {
+            const addBtn = document.getElementById('addBtn');
+            const resetBtn = document.getElementById('resetBtn');
+            const header = document.querySelector('.header h1');
+
+            if (state.viewOnly) {
+                addBtn.style.opacity = '0.5';
+                addBtn.style.cursor = 'not-allowed';
+                resetBtn.style.opacity = '0.5';
+                resetBtn.style.cursor = 'not-allowed';
+                header.innerHTML = 'Schedule Maker <span style="font-size: 0.7rem; background: #1976d2; color: white; padding: 2px 8px; border-radius: 4px; margin-left: 8px;">VIEW ONLY</span>';
+            } else {
+                addBtn.style.opacity = '1';
+                addBtn.style.cursor = 'pointer';
+                resetBtn.style.opacity = '1';
+                resetBtn.style.cursor = 'pointer';
+                header.textContent = 'Schedule Maker';
+            }
         }
 
         function setupEventListeners() {
@@ -1226,12 +1270,24 @@
             });
 
             // Sidebar buttons
-            document.getElementById('addBtn').addEventListener('click', () => openEventModal());
+            document.getElementById('addBtn').addEventListener('click', () => {
+                if (state.viewOnly) {
+                    alert('View-only mode. You cannot add events.');
+                    return;
+                }
+                openEventModal();
+            });
             document.getElementById('settingsBtn').addEventListener('click', () => openSettingsModal());
             document.getElementById('shareBtn').addEventListener('click', () => openShareModal());
             document.getElementById('syncBtn').addEventListener('click', () => openSyncModal());
             document.getElementById('exportBtn').addEventListener('click', () => openExportModal());
-            document.getElementById('resetBtn').addEventListener('click', resetSchedule);
+            document.getElementById('resetBtn').addEventListener('click', () => {
+                if (state.viewOnly) {
+                    alert('View-only mode. You cannot reset.');
+                    return;
+                }
+                resetSchedule();
+            });
 
             // Modal buttons
             document.getElementById('modalClose').addEventListener('click', closeEventModal);
@@ -1337,18 +1393,20 @@
                 `;
             }
 
-            // Add click handlers for hour slots
+            // Add click handlers for hour slots (disabled in view-only mode)
             document.querySelectorAll('.hour-slot').forEach(slot => {
                 slot.addEventListener('click', (e) => {
+                    if (state.viewOnly) return;
                     const day = slot.dataset.day;
                     const hour = parseInt(slot.dataset.hour);
                     openEventModal(null, day, hour);
                 });
             });
 
-            // Add click handlers for events
+            // Add click handlers for events (disabled in view-only mode)
             document.querySelectorAll('.event-block').forEach(block => {
                 block.addEventListener('click', (e) => {
+                    if (state.viewOnly) return;
                     e.stopPropagation();
                     const eventId = block.dataset.id;
                     const day = block.dataset.day;
@@ -1637,27 +1695,36 @@
         }
 
         function openShareModal() {
-            let url;
-            if (state.syncRoomId) {
-                // Short URL with just room code
-                url = window.location.origin + window.location.pathname + '?room=' + state.syncRoomId;
-            } else {
+            let roomId = state.syncRoomId;
+            if (!roomId) {
                 // Create a new room for sharing
-                const roomId = generateRoomCode();
+                roomId = generateRoomCode();
                 joinRoom(roomId, true);
-                url = window.location.origin + window.location.pathname + '?room=' + roomId;
+                // Wait for room to be created before showing URLs
+                setTimeout(() => showShareUrls(roomId), 200);
+            } else {
+                showShareUrls(roomId);
             }
-            document.getElementById('shareUrl').value = url;
-            document.getElementById('copyStatus').style.display = 'none';
             shareModal.classList.add('active');
+        }
+
+        function showShareUrls(roomId) {
+            const baseUrl = window.location.origin + window.location.pathname;
+            if (state.editKey) {
+                document.getElementById('shareUrlEdit').value = baseUrl + '?room=' + roomId + '&key=' + state.editKey;
+            } else {
+                document.getElementById('shareUrlEdit').value = 'No edit access';
+            }
+            document.getElementById('shareUrlView').value = baseUrl + '?room=' + roomId;
+            document.getElementById('copyStatus').style.display = 'none';
         }
 
         function closeShareModal() {
             shareModal.classList.remove('active');
         }
 
-        function copyShareUrl() {
-            const urlInput = document.getElementById('shareUrl');
+        function copyShareUrl(mode) {
+            const urlInput = document.getElementById(mode === 'view' ? 'shareUrlView' : 'shareUrlEdit');
             urlInput.select();
             navigator.clipboard.writeText(urlInput.value).then(() => {
                 document.getElementById('copyStatus').style.display = 'block';
@@ -1724,7 +1791,16 @@
             joinRoom(roomId, false);
         }
 
-        function joinRoom(roomId, isNewRoom) {
+        function generateEditKey() {
+            const chars = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+            let key = '';
+            for (let i = 0; i < 12; i++) {
+                key += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return key;
+        }
+
+        function joinRoom(roomId, isNewRoom, editKey = null) {
             // Remove existing listener if any
             if (syncListener) {
                 database.ref('rooms/' + state.syncRoomId).off('value', syncListener);
@@ -1744,10 +1820,39 @@
                 const data = snapshot.val();
                 const hasRemoteEvents = data && data.events && days.some(d => data.events[d] && data.events[d].length > 0);
 
-                // Push local data if room is empty and we have local events
-                if (!hasRemoteEvents && hasLocalEvents) {
+                if (isNewRoom || (!hasRemoteEvents && hasLocalEvents)) {
+                    // Creating new room - use provided key or generate new one
+                    state.editKey = editKey || generateEditKey();
+                    state.viewOnly = false;
+                    localStorage.setItem('schedulemaker_editKey_' + roomId, state.editKey);
                     syncToFirebase();
+                } else if (data && data.editKey) {
+                    // Existing room - verify edit key
+                    if (editKey) {
+                        // Key provided in URL - only accept exact match
+                        if (editKey === data.editKey) {
+                            state.viewOnly = false;
+                            state.editKey = editKey;
+                            localStorage.setItem('schedulemaker_editKey_' + roomId, editKey);
+                        } else {
+                            state.viewOnly = true;
+                            state.editKey = null;
+                        }
+                    } else {
+                        // No key in URL - check localStorage for saved key
+                        const savedKey = localStorage.getItem('schedulemaker_editKey_' + roomId);
+                        if (savedKey && savedKey === data.editKey) {
+                            state.viewOnly = false;
+                            state.editKey = savedKey;
+                        } else {
+                            state.viewOnly = true;
+                            state.editKey = null;
+                        }
+                    }
                 }
+
+                // Update UI after permission check
+                updateViewOnlyUI();
 
                 // Set up real-time listener after initial check
                 setupSyncListener(roomId);
@@ -1814,7 +1919,9 @@
 
             const savedRoom = localStorage.getItem('schedulemaker_syncRoom');
             if (savedRoom) {
-                joinRoom(savedRoom, false);
+                const savedKey = localStorage.getItem('schedulemaker_editKey_' + savedRoom);
+                state.editKey = savedKey || null;
+                joinRoom(savedRoom, false, savedKey);
             }
         }
 
