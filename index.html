@@ -679,6 +679,9 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-danger" id="deleteEvent" style="display: none;">Delete</button>
+                <button class="btn btn-secondary" id="copyEvent" style="display: none;">Copy</button>
+                <button class="btn btn-secondary" id="pasteEvent" style="display: none;">Paste</button>
+                <div style="flex: 1;"></div>
                 <button class="btn btn-secondary" id="cancelEvent">Cancel</button>
                 <button class="btn btn-primary" id="saveEvent">Save</button>
             </div>
@@ -784,6 +787,7 @@
             showWeekends: true,
             selectedColor: '#4A90A4',
             editingEventId: null,
+            copiedEvent: null,
             events: {
                 monday: [],
                 tuesday: [],
@@ -956,6 +960,8 @@
             document.getElementById('cancelEvent').addEventListener('click', closeEventModal);
             document.getElementById('saveEvent').addEventListener('click', saveEvent);
             document.getElementById('deleteEvent').addEventListener('click', deleteEvent);
+            document.getElementById('copyEvent').addEventListener('click', copyEvent);
+            document.getElementById('pasteEvent').addEventListener('click', pasteEvent);
 
             // Close modals on overlay click
             eventModal.addEventListener('click', (e) => {
@@ -1143,6 +1149,8 @@
 
             document.getElementById('modalTitle').textContent = event ? 'Edit Event' : 'Add Event';
             document.getElementById('deleteEvent').style.display = event ? 'inline-block' : 'none';
+            document.getElementById('copyEvent').style.display = event ? 'inline-block' : 'none';
+            document.getElementById('pasteEvent').style.display = (!event && state.copiedEvent) ? 'inline-block' : 'none';
 
             if (event) {
                 document.getElementById('eventTitle').value = event.title;
@@ -1242,6 +1250,35 @@
             closeEventModal();
             renderCalendar();
             saveState();
+        }
+
+        function copyEvent() {
+            const day = document.getElementById('eventDay').value;
+            const event = state.events[day].find(e => e.id === state.editingEventId);
+            if (event) {
+                state.copiedEvent = {
+                    title: event.title,
+                    location: event.location,
+                    start: event.start,
+                    end: event.end,
+                    color: event.color
+                };
+                closeEventModal();
+                // Show brief feedback
+                const btn = document.getElementById('addBtn');
+                btn.style.background = '#27ae60';
+                setTimeout(() => btn.style.background = '', 500);
+            }
+        }
+
+        function pasteEvent() {
+            if (!state.copiedEvent) return;
+
+            document.getElementById('eventTitle').value = state.copiedEvent.title;
+            document.getElementById('eventLocation').value = state.copiedEvent.location || '';
+            document.getElementById('eventStart').value = state.copiedEvent.start;
+            document.getElementById('eventEnd').value = state.copiedEvent.end;
+            selectColor(state.copiedEvent.color);
         }
 
         function openSettingsModal() {
