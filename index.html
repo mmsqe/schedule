@@ -777,10 +777,39 @@
         const dayBtns = document.querySelectorAll('.day-btn');
         const colorOptions = document.querySelectorAll('.color-option');
 
+        // LocalStorage functions
+        const STORAGE_KEY = 'schedulemaker_data';
+
+        function saveState() {
+            const dataToSave = {
+                events: state.events,
+                startHour: state.startHour,
+                endHour: state.endHour,
+                showWeekends: state.showWeekends
+            };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+        }
+
+        function loadState() {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                try {
+                    const data = JSON.parse(saved);
+                    if (data.events) state.events = data.events;
+                    if (data.startHour) state.startHour = data.startHour;
+                    if (data.endHour) state.endHour = data.endHour;
+                    if (typeof data.showWeekends === 'boolean') state.showWeekends = data.showWeekends;
+                } catch (e) {
+                    console.error('Failed to load saved data:', e);
+                }
+            }
+        }
+
         // Initialize
         init();
 
         function init() {
+            loadState();
             renderCalendar();
             setupEventListeners();
             setActiveDay();
@@ -1100,6 +1129,7 @@
 
             closeEventModal();
             renderCalendar();
+            saveState();
         }
 
         function deleteEvent() {
@@ -1110,6 +1140,7 @@
 
             closeEventModal();
             renderCalendar();
+            saveState();
         }
 
         function openSettingsModal() {
@@ -1129,6 +1160,7 @@
             state.showWeekends = document.getElementById('showWeekends').checked;
             closeSettingsModal();
             renderCalendar();
+            saveState();
         }
 
         function openExportModal() {
@@ -1143,6 +1175,7 @@
             if (!confirm('Reset all events? This cannot be undone.')) return;
             days.forEach(day => state.events[day] = []);
             renderCalendar();
+            saveState();
         }
 
         // Export Functions
