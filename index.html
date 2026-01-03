@@ -1124,8 +1124,23 @@
             return window.location.origin + window.location.pathname + '?s=' + compressed;
         }
 
+        let joiningFromUrl = false;
+
         function loadFromUrl() {
             const params = new URLSearchParams(window.location.search);
+
+            // Check for room code first (short URL)
+            const roomCode = params.get('room');
+            if (roomCode) {
+                joiningFromUrl = true;
+                // Will join room after init completes
+                setTimeout(() => joinRoom(roomCode.toUpperCase(), false), 100);
+                // Clear URL params
+                window.history.replaceState({}, '', window.location.pathname);
+                return true;
+            }
+
+            // Legacy: check for compressed data URL
             const data = params.get('s');
             if (data) {
                 try {
@@ -1573,7 +1588,16 @@
         }
 
         function openShareModal() {
-            const url = encodeScheduleToUrl();
+            let url;
+            if (state.syncRoomId) {
+                // Short URL with just room code
+                url = window.location.origin + window.location.pathname + '?room=' + state.syncRoomId;
+            } else {
+                // Create a new room for sharing
+                const roomId = generateRoomCode();
+                joinRoom(roomId, true);
+                url = window.location.origin + window.location.pathname + '?room=' + roomId;
+            }
             document.getElementById('shareUrl').value = url;
             document.getElementById('copyStatus').style.display = 'none';
             shareModal.classList.add('active');
@@ -1715,6 +1739,9 @@
 
         // Auto-reconnect to saved room on load
         function autoReconnectSync() {
+            // Skip if joining from URL room
+            if (joiningFromUrl) return;
+
             const savedRoom = localStorage.getItem('schedulemaker_syncRoom');
             if (savedRoom) {
                 joinRoom(savedRoom, false);
