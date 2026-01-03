@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Schedule Maker</title>
+    <!-- LZ-String compression for shorter URLs -->
+    <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -835,30 +837,60 @@
             }
         }
 
-        // URL Sharing functions
+        // URL Sharing functions (with LZ compression for shorter URLs)
         function encodeScheduleToUrl() {
+            // Only include days with events to minimize data
+            const eventsToShare = {};
+            days.forEach(day => {
+                if (state.events[day] && state.events[day].length > 0) {
+                    eventsToShare[day] = state.events[day].map(e => ({
+                        t: e.title,
+                        l: e.location,
+                        s: e.start,
+                        e: e.end,
+                        c: e.color
+                    }));
+                }
+            });
+
             const dataToShare = {
-                e: state.events,
-                s: state.startHour,
-                n: state.endHour,
-                w: state.showWeekends
+                e: eventsToShare,
+                h: [state.startHour, state.endHour],
+                w: state.showWeekends ? 1 : 0
             };
             const json = JSON.stringify(dataToShare);
-            const encoded = btoa(encodeURIComponent(json));
-            return window.location.origin + window.location.pathname + '?d=' + encoded;
+            const compressed = LZString.compressToEncodedURIComponent(json);
+            return window.location.origin + window.location.pathname + '?s=' + compressed;
         }
 
         function loadFromUrl() {
             const params = new URLSearchParams(window.location.search);
-            const data = params.get('d');
+            const data = params.get('s');
             if (data) {
                 try {
-                    const json = decodeURIComponent(atob(data));
+                    const json = LZString.decompressFromEncodedURIComponent(data);
                     const parsed = JSON.parse(json);
-                    if (parsed.e) state.events = parsed.e;
-                    if (parsed.s) state.startHour = parsed.s;
-                    if (parsed.n) state.endHour = parsed.n;
-                    if (typeof parsed.w === 'boolean') state.showWeekends = parsed.w;
+
+                    // Restore events with full structure
+                    if (parsed.e) {
+                        days.forEach(day => {
+                            if (parsed.e[day]) {
+                                state.events[day] = parsed.e[day].map(e => ({
+                                    id: Date.now() + Math.random(),
+                                    title: e.t,
+                                    location: e.l || '',
+                                    start: e.s,
+                                    end: e.e,
+                                    color: e.c
+                                }));
+                            }
+                        });
+                    }
+                    if (parsed.h) {
+                        state.startHour = parsed.h[0];
+                        state.endHour = parsed.h[1];
+                    }
+                    if (typeof parsed.w !== 'undefined') state.showWeekends = parsed.w === 1;
                     return true;
                 } catch (e) {
                     console.error('Failed to load from URL:', e);
