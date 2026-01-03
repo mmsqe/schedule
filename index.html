@@ -1004,7 +1004,7 @@
             storageBucket: "marcus-f191d.firebasestorage.app",
             messagingSenderId: "100344969516",
             appId: "1:100344969516:web:5d00ea7faa2b6b0af49489",
-            databaseURL: "https://marcus-f191d-default-rtdb.firebaseio.com"
+            databaseURL: "https://marcus-f191d-default-rtdb.asia-southeast1.firebasedatabase.app"
         };
 
         // Initialize Firebase
@@ -1088,7 +1088,12 @@
             if (saved) {
                 try {
                     const data = JSON.parse(saved);
-                    if (data.events) state.events = data.events;
+                    if (data.events) {
+                        // Ensure all days exist
+                        days.forEach(day => {
+                            state.events[day] = data.events[day] || [];
+                        });
+                    }
                     if (data.startHour) state.startHour = data.startHour;
                     if (data.endHour) state.endHour = data.endHour;
                     if (typeof data.showWeekends === 'boolean') state.showWeekends = data.showWeekends;
@@ -1135,8 +1140,6 @@
                 joiningFromUrl = true;
                 // Will join room after init completes
                 setTimeout(() => joinRoom(roomCode.toUpperCase(), false), 100);
-                // Clear URL params
-                window.history.replaceState({}, '', window.location.pathname);
                 return true;
             }
 
@@ -1347,9 +1350,11 @@
             document.querySelectorAll('.event-block').forEach(block => {
                 block.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    const eventId = parseInt(block.dataset.id);
+                    const eventId = block.dataset.id;
                     const day = block.dataset.day;
-                    const event = state.events[day].find(ev => ev.id === eventId);
+                    const dayEvents = state.events[day] || [];
+                    // Compare as strings since Firebase might change types
+                    const event = dayEvents.find(ev => String(ev.id) === String(eventId));
                     if (event) {
                         openEventModal(event, day);
                     }
@@ -1488,18 +1493,48 @@
                 return;
             }
 
+            // Ensure day array exists
+            if (!state.events[day]) {
+                state.events[day] = [];
+            }
+
             if (state.editingEventId) {
-                // Update existing event
-                const eventIndex = state.events[day].findIndex(e => e.id === state.editingEventId);
-                if (eventIndex !== -1) {
-                    state.events[day][eventIndex] = {
-                        ...state.events[day][eventIndex],
+                // Update existing event - find which day it's currently in
+                let foundDay = null;
+                let eventIndex = -1;
+
+                // First check selected day (compare as strings for Firebase compatibility)
+                if (state.events[day]) {
+                    eventIndex = state.events[day].findIndex(e => String(e.id) === String(state.editingEventId));
+                    if (eventIndex !== -1) foundDay = day;
+                }
+
+                // If not found, search all days (event might have been on different day)
+                if (foundDay === null) {
+                    for (const d of days) {
+                        if (state.events[d]) {
+                            const idx = state.events[d].findIndex(e => String(e.id) === String(state.editingEventId));
+                            if (idx !== -1) {
+                                foundDay = d;
+                                eventIndex = idx;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (foundDay !== null && eventIndex !== -1) {
+                    // Remove from old day
+                    state.events[foundDay].splice(eventIndex, 1);
+                    // Add to new day (might be same or different)
+                    state.events[day].push({
+                        id: state.editingEventId,
                         title,
                         location,
                         start,
                         end,
                         color: state.selectedColor
-                    };
+                    });
                 }
             } else {
                 // Add new event
@@ -1522,8 +1557,16 @@
         function deleteEvent() {
             if (!state.editingEventId) return;
 
-            const day = document.getElementById('eventDay').value;
-            state.events[day] = state.events[day].filter(e => e.id !== state.editingEventId);
+            // Search all days for the event
+            for (const day of days) {
+                if (state.events[day]) {
+                    const idx = state.events[day].findIndex(e => String(e.id) === String(state.editingEventId));
+                    if (idx !== -1) {
+                        state.events[day].splice(idx, 1);
+                        break;
+                    }
+                }
+            }
 
             closeEventModal();
             renderCalendar();
@@ -1531,8 +1574,14 @@
         }
 
         function copyEvent() {
-            const day = document.getElementById('eventDay').value;
-            const event = state.events[day].find(e => e.id === state.editingEventId);
+            // Search all days for the event
+            let event = null;
+            for (const day of days) {
+                if (state.events[day]) {
+                    event = state.events[day].find(e => String(e.id) === String(state.editingEventId));
+                    if (event) break;
+                }
+            }
             if (event) {
                 state.copiedEvent = {
                     title: event.title,
@@ -1681,22 +1730,43 @@
                 database.ref('rooms/' + state.syncRoomId).off('value', syncListener);
             }
 
+            // Save local events before joining (in case we need to push them)
+            const localEvents = JSON.parse(JSON.stringify(state.events));
+            const hasLocalEvents = days.some(d => localEvents[d] && localEvents[d].length > 0);
+
             state.syncRoomId = roomId;
 
             // Save room ID to localStorage
             localStorage.setItem('schedulemaker_syncRoom', roomId);
 
-            // If creating a new room, push current data first
-            if (isNewRoom) {
-                syncToFirebase();
-            }
+            // Check room and decide whether to push or pull
+            database.ref('rooms/' + roomId).once('value', (snapshot) => {
+                const data = snapshot.val();
+                const hasRemoteEvents = data && data.events && days.some(d => data.events[d] && data.events[d].length > 0);
 
-            // Set up real-time listener
+                // Push local data if room is empty and we have local events
+                if (!hasRemoteEvents && hasLocalEvents) {
+                    syncToFirebase();
+                }
+
+                // Set up real-time listener after initial check
+                setupSyncListener(roomId);
+            });
+
+            updateSyncUI();
+        }
+
+        function setupSyncListener(roomId) {
             syncListener = database.ref('rooms/' + roomId).on('value', (snapshot) => {
                 const data = snapshot.val();
                 if (data) {
                     // Update local state from Firebase
-                    if (data.events) state.events = data.events;
+                    if (data.events) {
+                        // Ensure all days exist (Firebase drops empty arrays)
+                        days.forEach(day => {
+                            state.events[day] = data.events[day] || [];
+                        });
+                    }
                     if (data.startHour) state.startHour = data.startHour;
                     if (data.endHour) state.endHour = data.endHour;
                     if (typeof data.showWeekends === 'boolean') state.showWeekends = data.showWeekends;
