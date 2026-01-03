@@ -596,6 +596,17 @@
                 <span>Settings</span>
             </button>
 
+            <button class="sidebar-btn" id="shareBtn" title="Share">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="18" cy="5" r="3"></circle>
+                    <circle cx="6" cy="12" r="3"></circle>
+                    <circle cx="18" cy="19" r="3"></circle>
+                    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+                </svg>
+                <span>Share</span>
+            </button>
+
             <button class="sidebar-btn" id="exportBtn" title="Export">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -743,6 +754,24 @@
         </div>
     </div>
 
+    <!-- Share Modal -->
+    <div class="modal-overlay" id="shareModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Share Schedule</h2>
+                <button class="modal-close" onclick="closeShareModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 15px; color: #666;">Anyone with this link can view your schedule:</p>
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" id="shareUrl" readonly style="flex: 1; font-size: 0.85rem;">
+                    <button class="btn btn-primary" onclick="copyShareUrl()">Copy</button>
+                </div>
+                <p id="copyStatus" style="margin-top: 10px; color: #27ae60; font-size: 0.85rem; display: none;">Link copied to clipboard!</p>
+            </div>
+        </div>
+    </div>
+
     <script>
         // State
         let state = {
@@ -773,6 +802,7 @@
         const eventModal = document.getElementById('eventModal');
         const settingsModal = document.getElementById('settingsModal');
         const exportModal = document.getElementById('exportModal');
+        const shareModal = document.getElementById('shareModal');
         const viewToggleBtns = document.querySelectorAll('.view-toggle button');
         const dayBtns = document.querySelectorAll('.day-btn');
         const colorOptions = document.querySelectorAll('.color-option');
@@ -805,11 +835,46 @@
             }
         }
 
+        // URL Sharing functions
+        function encodeScheduleToUrl() {
+            const dataToShare = {
+                e: state.events,
+                s: state.startHour,
+                n: state.endHour,
+                w: state.showWeekends
+            };
+            const json = JSON.stringify(dataToShare);
+            const encoded = btoa(encodeURIComponent(json));
+            return window.location.origin + window.location.pathname + '?d=' + encoded;
+        }
+
+        function loadFromUrl() {
+            const params = new URLSearchParams(window.location.search);
+            const data = params.get('d');
+            if (data) {
+                try {
+                    const json = decodeURIComponent(atob(data));
+                    const parsed = JSON.parse(json);
+                    if (parsed.e) state.events = parsed.e;
+                    if (parsed.s) state.startHour = parsed.s;
+                    if (parsed.n) state.endHour = parsed.n;
+                    if (typeof parsed.w === 'boolean') state.showWeekends = parsed.w;
+                    return true;
+                } catch (e) {
+                    console.error('Failed to load from URL:', e);
+                }
+            }
+            return false;
+        }
+
         // Initialize
         init();
 
         function init() {
-            loadState();
+            // Load from URL first (shared link), otherwise from localStorage
+            if (!loadFromUrl()) {
+                loadState();
+            }
             renderCalendar();
             setupEventListeners();
             setActiveDay();
@@ -850,6 +915,7 @@
             // Sidebar buttons
             document.getElementById('addBtn').addEventListener('click', () => openEventModal());
             document.getElementById('settingsBtn').addEventListener('click', () => openSettingsModal());
+            document.getElementById('shareBtn').addEventListener('click', () => openShareModal());
             document.getElementById('exportBtn').addEventListener('click', () => openExportModal());
             document.getElementById('resetBtn').addEventListener('click', resetSchedule);
 
@@ -868,6 +934,9 @@
             });
             exportModal.addEventListener('click', (e) => {
                 if (e.target === exportModal) closeExportModal();
+            });
+            shareModal.addEventListener('click', (e) => {
+                if (e.target === shareModal) closeShareModal();
             });
         }
 
@@ -1169,6 +1238,28 @@
 
         function closeExportModal() {
             exportModal.classList.remove('active');
+        }
+
+        function openShareModal() {
+            const url = encodeScheduleToUrl();
+            document.getElementById('shareUrl').value = url;
+            document.getElementById('copyStatus').style.display = 'none';
+            shareModal.classList.add('active');
+        }
+
+        function closeShareModal() {
+            shareModal.classList.remove('active');
+        }
+
+        function copyShareUrl() {
+            const urlInput = document.getElementById('shareUrl');
+            urlInput.select();
+            navigator.clipboard.writeText(urlInput.value).then(() => {
+                document.getElementById('copyStatus').style.display = 'block';
+                setTimeout(() => {
+                    document.getElementById('copyStatus').style.display = 'none';
+                }, 2000);
+            });
         }
 
         function resetSchedule() {
