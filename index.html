@@ -6,6 +6,9 @@
     <title>Schedule Maker</title>
     <!-- LZ-String compression for shorter URLs -->
     <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
     <style>
         * {
             margin: 0;
@@ -695,7 +698,8 @@
             }
 
             #settingsModal .modal,
-            #exportModal .modal {
+            #exportModal .modal,
+            #syncModal .modal {
                 height: auto;
                 max-height: 90%;
                 margin: 20px;
@@ -774,6 +778,13 @@
                     <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
                 </svg>
                 <span>Share</span>
+            </button>
+
+            <button class="sidebar-btn" id="syncBtn" title="Sync">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/>
+                </svg>
+                <span>Sync</span>
             </button>
 
             <button class="sidebar-btn" id="exportBtn" title="Export">
@@ -944,7 +955,62 @@
         </div>
     </div>
 
+    <!-- Sync Modal -->
+    <div class="modal-overlay" id="syncModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Family Sync</h2>
+                <button class="modal-close" onclick="closeSyncModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="syncStatus" style="margin-bottom: 20px; padding: 12px; border-radius: 8px; background: #f5f5f5;">
+                    <span id="syncStatusText">Not synced</span>
+                </div>
+
+                <div class="form-group">
+                    <label>Sync Room Code</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" id="syncRoomId" placeholder="Enter code or create new">
+                        <button class="btn btn-primary" onclick="joinSyncRoom()">Join</button>
+                    </div>
+                </div>
+
+                <div style="text-align: center; margin: 20px 0; color: #999;">or</div>
+
+                <button class="btn btn-secondary" style="width: 100%;" onclick="createSyncRoom()">Create New Room</button>
+
+                <div id="syncRoomInfo" style="display: none; margin-top: 20px; padding: 15px; background: #e8f5e9; border-radius: 8px;">
+                    <p style="margin-bottom: 10px; font-weight: 600; color: #2e7d32;">Room Active!</p>
+                    <p style="font-size: 0.9rem; color: #666;">Share this code with family:</p>
+                    <div style="display: flex; gap: 10px; margin-top: 10px;">
+                        <input type="text" id="syncRoomCode" readonly style="flex: 1; font-weight: 600; text-align: center; font-size: 1.1rem;">
+                        <button class="btn btn-secondary" onclick="copySyncCode()">Copy</button>
+                    </div>
+                </div>
+
+                <div style="margin-top: 20px;">
+                    <button class="btn btn-danger" id="disconnectSync" style="width: 100%; display: none;" onclick="disconnectSync()">Disconnect</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyCpAAex1hdFHLiNiEkRNK2J-2gPjnH7Dvs",
+            authDomain: "marcus-f191d.firebaseapp.com",
+            projectId: "marcus-f191d",
+            storageBucket: "marcus-f191d.firebasestorage.app",
+            messagingSenderId: "100344969516",
+            appId: "1:100344969516:web:5d00ea7faa2b6b0af49489",
+            databaseURL: "https://marcus-f191d-default-rtdb.firebaseio.com"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+
         // State
         let state = {
             view: 'weekly',
@@ -955,6 +1021,7 @@
             selectedColor: '#4A90A4',
             editingEventId: null,
             copiedEvent: null,
+            syncRoomId: null,
             events: {
                 monday: [],
                 tuesday: [],
@@ -966,6 +1033,8 @@
             }
         };
 
+        let syncListener = null;
+
         const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
         const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
         const dayNamesShort = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -976,6 +1045,7 @@
         const settingsModal = document.getElementById('settingsModal');
         const exportModal = document.getElementById('exportModal');
         const shareModal = document.getElementById('shareModal');
+        const syncModal = document.getElementById('syncModal');
         const viewToggleBtns = document.querySelectorAll('.view-toggle button');
         const dayBtns = document.querySelectorAll('.day-btn');
         const colorOptions = document.querySelectorAll('.color-option');
@@ -991,6 +1061,26 @@
                 showWeekends: state.showWeekends
             };
             localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+
+            // Sync to Firebase if connected
+            if (state.syncRoomId) {
+                syncToFirebase();
+            }
+        }
+
+        function syncToFirebase() {
+            if (!state.syncRoomId) return;
+
+            const dataToSync = {
+                events: state.events,
+                startHour: state.startHour,
+                endHour: state.endHour,
+                showWeekends: state.showWeekends,
+                lastUpdated: Date.now()
+            };
+
+            database.ref('rooms/' + state.syncRoomId).set(dataToSync)
+                .catch(err => console.error('Sync error:', err));
         }
 
         function loadState() {
@@ -1081,6 +1171,8 @@
             renderCalendar();
             setupEventListeners();
             setActiveDay();
+            // Auto-reconnect to Firebase sync room if previously connected
+            autoReconnectSync();
         }
 
         function setupEventListeners() {
@@ -1119,6 +1211,7 @@
             document.getElementById('addBtn').addEventListener('click', () => openEventModal());
             document.getElementById('settingsBtn').addEventListener('click', () => openSettingsModal());
             document.getElementById('shareBtn').addEventListener('click', () => openShareModal());
+            document.getElementById('syncBtn').addEventListener('click', () => openSyncModal());
             document.getElementById('exportBtn').addEventListener('click', () => openExportModal());
             document.getElementById('resetBtn').addEventListener('click', resetSchedule);
 
@@ -1142,6 +1235,9 @@
             });
             shareModal.addEventListener('click', (e) => {
                 if (e.target === shareModal) closeShareModal();
+            });
+            syncModal.addEventListener('click', (e) => {
+                if (e.target === syncModal) closeSyncModal();
             });
         }
 
@@ -1496,6 +1592,133 @@
                     document.getElementById('copyStatus').style.display = 'none';
                 }, 2000);
             });
+        }
+
+        // Sync Modal Functions
+        function openSyncModal() {
+            updateSyncUI();
+            syncModal.classList.add('active');
+        }
+
+        function closeSyncModal() {
+            syncModal.classList.remove('active');
+        }
+
+        function updateSyncUI() {
+            const statusEl = document.getElementById('syncStatus');
+            const statusText = document.getElementById('syncStatusText');
+            const roomInfo = document.getElementById('syncRoomInfo');
+            const roomCodeInput = document.getElementById('syncRoomCode');
+            const disconnectBtn = document.getElementById('disconnectSync');
+            const joinInput = document.getElementById('syncRoomId');
+
+            if (state.syncRoomId) {
+                statusEl.style.background = '#e8f5e9';
+                statusText.innerHTML = '<span style="color: #2e7d32;">&#10003; Connected to room</span>';
+                roomInfo.style.display = 'block';
+                roomCodeInput.value = state.syncRoomId;
+                disconnectBtn.style.display = 'block';
+                joinInput.value = state.syncRoomId;
+            } else {
+                statusEl.style.background = '#f5f5f5';
+                statusText.textContent = 'Not synced';
+                roomInfo.style.display = 'none';
+                disconnectBtn.style.display = 'none';
+                joinInput.value = '';
+            }
+        }
+
+        function generateRoomCode() {
+            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+            let code = '';
+            for (let i = 0; i < 6; i++) {
+                code += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return code;
+        }
+
+        function createSyncRoom() {
+            const roomId = generateRoomCode();
+            joinRoom(roomId, true);
+        }
+
+        function joinSyncRoom() {
+            const roomId = document.getElementById('syncRoomId').value.trim().toUpperCase();
+            if (!roomId) {
+                alert('Please enter a room code');
+                return;
+            }
+            joinRoom(roomId, false);
+        }
+
+        function joinRoom(roomId, isNewRoom) {
+            // Remove existing listener if any
+            if (syncListener) {
+                database.ref('rooms/' + state.syncRoomId).off('value', syncListener);
+            }
+
+            state.syncRoomId = roomId;
+
+            // Save room ID to localStorage
+            localStorage.setItem('schedulemaker_syncRoom', roomId);
+
+            // If creating a new room, push current data first
+            if (isNewRoom) {
+                syncToFirebase();
+            }
+
+            // Set up real-time listener
+            syncListener = database.ref('rooms/' + roomId).on('value', (snapshot) => {
+                const data = snapshot.val();
+                if (data) {
+                    // Update local state from Firebase
+                    if (data.events) state.events = data.events;
+                    if (data.startHour) state.startHour = data.startHour;
+                    if (data.endHour) state.endHour = data.endHour;
+                    if (typeof data.showWeekends === 'boolean') state.showWeekends = data.showWeekends;
+
+                    // Save to localStorage
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                        events: state.events,
+                        startHour: state.startHour,
+                        endHour: state.endHour,
+                        showWeekends: state.showWeekends
+                    }));
+
+                    // Re-render calendar
+                    renderCalendar();
+                }
+            });
+
+            updateSyncUI();
+        }
+
+        function disconnectSync() {
+            if (syncListener && state.syncRoomId) {
+                database.ref('rooms/' + state.syncRoomId).off('value', syncListener);
+            }
+            state.syncRoomId = null;
+            syncListener = null;
+            localStorage.removeItem('schedulemaker_syncRoom');
+            updateSyncUI();
+        }
+
+        function copySyncCode() {
+            const codeInput = document.getElementById('syncRoomCode');
+            codeInput.select();
+            navigator.clipboard.writeText(codeInput.value).then(() => {
+                const btn = event.target;
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.textContent = 'Copy', 1500);
+            });
+        }
+
+        // Auto-reconnect to saved room on load
+        function autoReconnectSync() {
+            const savedRoom = localStorage.getItem('schedulemaker_syncRoom');
+            if (savedRoom) {
+                joinRoom(savedRoom, false);
+            }
         }
 
         function resetSchedule() {
