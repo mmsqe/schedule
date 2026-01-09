@@ -49,6 +49,11 @@
             font-size: 1.5rem;
             color: #2c3e50;
             font-weight: 600;
+            cursor: pointer;
+        }
+
+        .header h1:hover {
+            opacity: 0.7;
         }
 
         .day-selector {
@@ -100,6 +105,12 @@
             flex-shrink: 0;
             background: #fafafa;
             border-right: 1px solid #e8e8e8;
+        }
+
+        .time-header {
+            padding: 12px;
+            background: #fafafa;
+            border-bottom: 1px solid #e8e8e8;
         }
 
         .time-label {
@@ -875,6 +886,10 @@
             </div>
             <div class="modal-body">
                 <div class="settings-group">
+                    <h3>Schedule Title</h3>
+                    <input type="text" id="scheduleTitle" placeholder="Schedule Maker" style="margin-top: 5px;">
+                </div>
+                <div class="settings-group">
                     <h3>Time Range</h3>
                     <div class="time-inputs">
                         <div>
@@ -1027,6 +1042,7 @@
             startHour: 7,
             endHour: 23,
             showWeekends: true,
+            title: 'Schedule Maker',
             selectedColor: '#4A90A4',
             editingEventId: null,
             copiedEvent: null,
@@ -1069,7 +1085,8 @@
                 events: state.events,
                 startHour: state.startHour,
                 endHour: state.endHour,
-                showWeekends: state.showWeekends
+                showWeekends: state.showWeekends,
+                title: state.title
             };
             localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
 
@@ -1087,6 +1104,7 @@
                 startHour: state.startHour,
                 endHour: state.endHour,
                 showWeekends: state.showWeekends,
+                title: state.title,
                 editKey: state.editKey,
                 lastUpdated: Date.now()
             };
@@ -1109,6 +1127,7 @@
                     if (data.startHour) state.startHour = data.startHour;
                     if (data.endHour) state.endHour = data.endHour;
                     if (typeof data.showWeekends === 'boolean') state.showWeekends = data.showWeekends;
+                    if (data.title) state.title = data.title;
                 } catch (e) {
                     console.error('Failed to load saved data:', e);
                 }
@@ -1195,6 +1214,18 @@
             return false;
         }
 
+        // Title function
+        function updateTitle() {
+            const headerTitle = document.querySelector('.header h1');
+            const displayTitle = state.title || 'Schedule Maker';
+            document.title = displayTitle;
+            if (!state.viewOnly) {
+                headerTitle.textContent = displayTitle;
+            } else {
+                headerTitle.innerHTML = displayTitle + ' <span style="font-size: 0.7rem; background: #1976d2; color: white; padding: 2px 8px; border-radius: 4px; margin-left: 8px;">VIEW ONLY</span>';
+            }
+        }
+
         // Initialize
         init();
 
@@ -1215,29 +1246,40 @@
             autoReconnectSync();
             // Update UI for view-only mode
             updateViewOnlyUI();
+            // Update title
+            updateTitle();
         }
 
         function updateViewOnlyUI() {
             const addBtn = document.getElementById('addBtn');
             const resetBtn = document.getElementById('resetBtn');
-            const header = document.querySelector('.header h1');
 
             if (state.viewOnly) {
                 addBtn.style.opacity = '0.5';
                 addBtn.style.cursor = 'not-allowed';
                 resetBtn.style.opacity = '0.5';
                 resetBtn.style.cursor = 'not-allowed';
-                header.innerHTML = 'Schedule Maker <span style="font-size: 0.7rem; background: #1976d2; color: white; padding: 2px 8px; border-radius: 4px; margin-left: 8px;">VIEW ONLY</span>';
             } else {
                 addBtn.style.opacity = '1';
                 addBtn.style.cursor = 'pointer';
                 resetBtn.style.opacity = '1';
                 resetBtn.style.cursor = 'pointer';
-                header.textContent = 'Schedule Maker';
             }
+            updateTitle();
         }
 
         function setupEventListeners() {
+            // Title click to edit
+            document.querySelector('.header h1').addEventListener('click', () => {
+                if (state.viewOnly) return;
+                const newTitle = prompt('Enter schedule title:', state.title || 'Schedule Maker');
+                if (newTitle !== null) {
+                    state.title = newTitle.trim() || 'Schedule Maker';
+                    updateTitle();
+                    saveState();
+                }
+            });
+
             // View toggle
             viewToggleBtns.forEach(btn => {
                 btn.addEventListener('click', () => {
@@ -1365,7 +1407,10 @@
                 });
 
                 calendarGrid.innerHTML = `
-                    <div class="time-column">${timeLabels}</div>
+                    <div class="time-column">
+                        <div class="time-header">&nbsp;</div>
+                        ${timeLabels}
+                    </div>
                     <div class="days-container">${dayColumns}</div>
                 `;
             } else {
@@ -1380,7 +1425,10 @@
                 const events = renderDayEvents(state.currentDay);
 
                 calendarGrid.innerHTML = `
-                    <div class="time-column">${timeLabels}</div>
+                    <div class="time-column">
+                        <div class="time-header">&nbsp;</div>
+                        ${timeLabels}
+                    </div>
                     <div class="days-container">
                         <div class="day-column" style="flex: 1;">
                             <div class="day-header">${dayNames[dayIndex]}</div>
@@ -1667,6 +1715,7 @@
         }
 
         function openSettingsModal() {
+            document.getElementById('scheduleTitle').value = state.title || '';
             document.getElementById('startHour').value = state.startHour;
             document.getElementById('endHour').value = state.endHour;
             document.getElementById('showWeekends').checked = state.showWeekends;
@@ -1678,9 +1727,12 @@
         }
 
         function applySettings() {
+            const newTitle = document.getElementById('scheduleTitle').value.trim();
+            state.title = newTitle || 'Schedule Maker';
             state.startHour = parseInt(document.getElementById('startHour').value);
             state.endHour = parseInt(document.getElementById('endHour').value);
             state.showWeekends = document.getElementById('showWeekends').checked;
+            updateTitle();
             closeSettingsModal();
             renderCalendar();
             saveState();
@@ -1875,17 +1927,20 @@
                     if (data.startHour) state.startHour = data.startHour;
                     if (data.endHour) state.endHour = data.endHour;
                     if (typeof data.showWeekends === 'boolean') state.showWeekends = data.showWeekends;
+                    if (data.title) state.title = data.title;
 
                     // Save to localStorage
                     localStorage.setItem(STORAGE_KEY, JSON.stringify({
                         events: state.events,
                         startHour: state.startHour,
                         endHour: state.endHour,
-                        showWeekends: state.showWeekends
+                        showWeekends: state.showWeekends,
+                        title: state.title
                     }));
 
-                    // Re-render calendar
+                    // Re-render calendar and update title
                     renderCalendar();
+                    updateTitle();
                 }
             });
 
