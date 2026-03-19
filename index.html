@@ -181,17 +181,36 @@
             right: 4px;
             border-radius: 6px;
             padding: 6px 10px;
-            cursor: pointer;
+            cursor: grab;
             transition: transform 0.15s, box-shadow 0.15s;
             overflow: hidden;
             border-left: 4px solid;
             z-index: 2;
+            user-select: none;
         }
 
         .event-block:hover {
             transform: scale(1.02);
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
             z-index: 10;
+        }
+
+        .event-block.dragging {
+            opacity: 0.25;
+            cursor: grabbing;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        .drag-indicator {
+            position: absolute;
+            left: 4px;
+            right: 4px;
+            border-radius: 6px;
+            border: 2px dashed #3498db;
+            background: rgba(52, 152, 219, 0.12);
+            pointer-events: none;
+            z-index: 3;
         }
 
         .event-title {
@@ -1455,6 +1474,7 @@
             document.querySelectorAll('.event-block').forEach(block => {
                 block.addEventListener('click', (e) => {
                     if (state.viewOnly) return;
+                    if (suppressNextClick) return;
                     e.stopPropagation();
                     const eventId = block.dataset.id;
                     const day = block.dataset.day;
@@ -1466,6 +1486,9 @@
                     }
                 });
             });
+
+            // Initialize drag & drop
+            initDragHandlers();
         }
 
         function renderDayEvents(day) {
@@ -1983,6 +2006,215 @@
         function resetSchedule() {
             if (!confirm('Reset all events? This cannot be undone.')) return;
             days.forEach(day => state.events[day] = []);
+            renderCalendar();
+            saveState();
+        }
+
+        // Drag & Drop Support
+        let dragState = null;
+        let dropIndicator = null;
+        let suppressNextClick = false;
+
+        function findEvent(eventId) {
+            for (const day of days) {
+                const ev = (state.events[day] || []).find(e => String(e.id) === String(eventId));
+                if (ev) return ev;
+            }
+            return null;
+        }
+
+        function minutesToTime(totalMinutes) {
+            const h = Math.floor(totalMinutes / 60);
+            const m = totalMinutes % 60;
+            return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+        }
+
+        function initDragHandlers() {
+            if (state.viewOnly) return;
+            document.querySelectorAll('.event-block').forEach(block => {
+                block.addEventListener('mousedown', onEventMouseDown);
+                block.addEventListener('touchstart', onEventTouchStart, { passive: false });
+            });
+        }
+
+        function onEventMouseDown(e) {
+            if (e.button !== 0 || state.viewOnly) return;
+            e.stopPropagation();
+            beginDrag(e.currentTarget, e.clientX, e.clientY);
+            const onMove = (ev) => handleDragMove(ev.clientX, ev.clientY);
+            const onUp = (ev) => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                endDrag(ev.clientX, ev.clientY);
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        }
+
+        function onEventTouchStart(e) {
+            if (state.viewOnly) return;
+            e.preventDefault();
+            const touch = e.touches[0];
+            beginDrag(e.currentTarget, touch.clientX, touch.clientY);
+            const onMove = (ev) => {
+                ev.preventDefault();
+                const t = ev.touches[0];
+                handleDragMove(t.clientX, t.clientY);
+            };
+            const onEnd = (ev) => {
+                document.removeEventListener('touchmove', onMove);
+                document.removeEventListener('touchend', onEnd);
+                const t = ev.changedTouches[0];
+                endDrag(t.clientX, t.clientY);
+            };
+            document.addEventListener('touchmove', onMove, { passive: false });
+            document.addEventListener('touchend', onEnd);
+        }
+
+        function beginDrag(block, clientX, clientY) {
+            const eventId = block.dataset.id;
+            const day = block.dataset.day;
+            const event = findEvent(eventId);
+            if (!event) return;
+
+            const rect = block.getBoundingClientRect();
+            const offsetY = clientY - rect.top;
+            const durationMinutes = timeToMinutes(event.end) - timeToMinutes(event.start);
+
+            const ghost = block.cloneNode(true);
+            Object.assign(ghost.style, {
+                position: 'fixed',
+                width: rect.width + 'px',
+                height: rect.height + 'px',
+                left: rect.left + 'px',
+                top: rect.top + 'px',
+                zIndex: '9999',
+                opacity: '0.85',
+                pointerEvents: 'none',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+                transform: 'scale(1.03)',
+                cursor: 'grabbing',
+                margin: '0',
+                transition: 'none',
+            });
+            document.body.appendChild(ghost);
+            block.classList.add('dragging');
+
+            dragState = {
+                eventId, originalDay: day, event, ghost,
+                originalBlock: block, offsetY, durationMinutes,
+                startX: clientX, startY: clientY, moved: false,
+            };
+        }
+
+        function handleDragMove(clientX, clientY) {
+            if (!dragState) return;
+            const { ghost, offsetY } = dragState;
+
+            if (!dragState.moved) {
+                const dx = Math.abs(clientX - dragState.startX);
+                const dy = Math.abs(clientY - dragState.startY);
+                if (dx < 5 && dy < 5) return;
+                dragState.moved = true;
+            }
+
+            ghost.style.left = (clientX - parseFloat(ghost.style.width) / 2) + 'px';
+            ghost.style.top = (clientY - offsetY) + 'px';
+
+            const target = getDragTarget(clientX, clientY - offsetY);
+            if (target) {
+                showDropIndicator(target.eventsEl, target.absoluteMinutes, dragState.durationMinutes);
+            } else {
+                removeDropIndicator();
+            }
+        }
+
+        function endDrag(clientX, clientY) {
+            if (!dragState) return;
+            const { ghost, originalBlock, eventId, originalDay, durationMinutes, moved } = dragState;
+
+            ghost.remove();
+            originalBlock.classList.remove('dragging');
+            removeDropIndicator();
+
+            if (moved) {
+                suppressNextClick = true;
+                setTimeout(() => suppressNextClick = false, 150);
+                const target = getDragTarget(clientX, clientY - dragState.offsetY);
+                if (target) {
+                    moveEventByDrag(eventId, originalDay, target.day, target.absoluteMinutes, durationMinutes);
+                }
+            }
+
+            dragState = null;
+        }
+
+        function getDragTarget(clientX, ghostTop) {
+            const dayColumns = document.querySelectorAll('.day-column');
+            for (const col of dayColumns) {
+                const rect = col.getBoundingClientRect();
+                if (clientX < rect.left || clientX > rect.right) continue;
+
+                const eventsEl = col.querySelector('.day-events');
+                if (!eventsEl) continue;
+
+                const evRect = eventsEl.getBoundingClientRect();
+                const relY = ghostTop - evRect.top;
+                const rawMinutes = (relY / 60) * 60;
+                const snappedRelMinutes = Math.round(rawMinutes / 15) * 15;
+                const absoluteMinutes = state.startHour * 60 + snappedRelMinutes;
+
+                const slot = col.querySelector('.hour-slot');
+                const day = slot ? slot.dataset.day : null;
+                if (!day) continue;
+
+                return { day, eventsEl, absoluteMinutes };
+            }
+            return null;
+        }
+
+        function showDropIndicator(eventsEl, absoluteStartMinutes, durationMinutes) {
+            if (!dropIndicator) {
+                dropIndicator = document.createElement('div');
+                dropIndicator.className = 'drag-indicator';
+            }
+            const top = ((absoluteStartMinutes - state.startHour * 60) / 60) * 60;
+            const height = (durationMinutes / 60) * 60;
+            dropIndicator.style.top = Math.max(0, top) + 'px';
+            dropIndicator.style.height = Math.max(20, height) + 'px';
+            if (dropIndicator.parentElement !== eventsEl) {
+                dropIndicator.remove();
+                eventsEl.appendChild(dropIndicator);
+            }
+        }
+
+        function removeDropIndicator() {
+            if (dropIndicator) {
+                dropIndicator.remove();
+                dropIndicator = null;
+            }
+        }
+
+        function moveEventByDrag(eventId, fromDay, toDay, newStartMinutes, durationMinutes) {
+            if (!toDay) return;
+            const fromEvents = state.events[fromDay];
+            if (!fromEvents) return;
+
+            const idx = fromEvents.findIndex(e => String(e.id) === String(eventId));
+            if (idx === -1) return;
+
+            const event = { ...fromEvents[idx] };
+
+            // Clamp within calendar bounds
+            const maxStart = state.endHour * 60 - durationMinutes;
+            const clampedStart = Math.max(state.startHour * 60, Math.min(newStartMinutes, maxStart));
+            event.start = minutesToTime(clampedStart);
+            event.end = minutesToTime(clampedStart + durationMinutes);
+
+            fromEvents.splice(idx, 1);
+            if (!state.events[toDay]) state.events[toDay] = [];
+            state.events[toDay].push(event);
+
             renderCalendar();
             saveState();
         }
