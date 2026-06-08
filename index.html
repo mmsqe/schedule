@@ -557,6 +557,93 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
 
+        /* Monthly View */
+        .month-grid {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #fff;
+        }
+
+        .month-weekdays {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            background: #fafafa;
+            border-bottom: 1px solid #e8e8e8;
+        }
+
+        .month-weekday {
+            padding: 12px;
+            text-align: center;
+            font-weight: 600;
+            color: #2c3e50;
+            font-size: 0.85rem;
+        }
+
+        .month-weeks {
+            flex: 1;
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            grid-auto-rows: minmax(110px, 1fr);
+        }
+
+        .month-cell {
+            border-right: 1px solid #f0f0f0;
+            border-bottom: 1px solid #f0f0f0;
+            padding: 6px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .month-cell:hover {
+            background: rgba(52, 152, 219, 0.06);
+        }
+
+        .month-cell.other-month {
+            background: #fafafa;
+        }
+
+        .month-cell.other-month .month-date {
+            color: #ccc;
+        }
+
+        .month-date {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 4px;
+            width: 24px;
+            height: 24px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .month-cell.today .month-date {
+            background: #3498db;
+            color: #fff;
+            border-radius: 50%;
+        }
+
+        .month-event {
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-bottom: 2px;
+            border-left: 3px solid;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: pointer;
+        }
+
+        .month-more {
+            font-size: 0.65rem;
+            color: #888;
+            padding: 0 4px;
+        }
+
         /* Responsive */
         @media (max-width: 900px) {
             .day-column {
@@ -647,6 +734,35 @@
             .calendar-grid {
                 min-height: auto;
                 border-radius: 8px;
+            }
+
+            .month-weeks {
+                grid-auto-rows: minmax(70px, 1fr);
+            }
+
+            .month-weekday {
+                padding: 8px 2px;
+                font-size: 0.7rem;
+            }
+
+            .month-cell {
+                padding: 3px;
+            }
+
+            .month-date {
+                font-size: 0.7rem;
+                width: 20px;
+                height: 20px;
+            }
+
+            .month-event {
+                font-size: 0.6rem;
+                padding: 1px 3px;
+            }
+
+            #monthLabel {
+                min-width: 110px !important;
+                font-size: 0.9rem;
             }
 
             .time-column {
@@ -763,6 +879,7 @@
                 <div class="view-toggle">
                     <button class="active" data-view="weekly">Weekly</button>
                     <button data-view="daily">Daily</button>
+                    <button data-view="monthly">Monthly</button>
                 </div>
                 <div class="day-selector" id="daySelectorDaily" style="display: none;">
                     <button class="day-btn" data-day="monday">Mon</button>
@@ -772,6 +889,11 @@
                     <button class="day-btn" data-day="friday">Fri</button>
                     <button class="day-btn" data-day="saturday">Sat</button>
                     <button class="day-btn" data-day="sunday">Sun</button>
+                </div>
+                <div class="day-selector" id="monthSelector" style="display: none; align-items: center;">
+                    <button class="day-btn" id="prevMonth" title="Previous month">&lsaquo;</button>
+                    <span id="monthLabel" style="min-width: 150px; text-align: center; font-weight: 600; color: #2c3e50;"></span>
+                    <button class="day-btn" id="nextMonth" title="Next month">&rsaquo;</button>
                 </div>
             </div>
 
@@ -1058,6 +1180,7 @@
         let state = {
             view: 'weekly',
             currentDay: 'monday',
+            monthDate: new Date(),
             startHour: 7,
             endHour: 23,
             showWeekends: true,
@@ -1307,6 +1430,8 @@
                     state.view = btn.dataset.view;
                     document.getElementById('daySelectorDaily').style.display =
                         state.view === 'daily' ? 'flex' : 'none';
+                    document.getElementById('monthSelector').style.display =
+                        state.view === 'monthly' ? 'flex' : 'none';
                     renderCalendar();
                 });
             });
@@ -1319,6 +1444,16 @@
                     state.currentDay = btn.dataset.day;
                     renderCalendar();
                 });
+            });
+
+            // Month navigation for monthly view
+            document.getElementById('prevMonth').addEventListener('click', () => {
+                state.monthDate = new Date(state.monthDate.getFullYear(), state.monthDate.getMonth() - 1, 1);
+                renderCalendar();
+            });
+            document.getElementById('nextMonth').addEventListener('click', () => {
+                state.monthDate = new Date(state.monthDate.getFullYear(), state.monthDate.getMonth() + 1, 1);
+                renderCalendar();
             });
 
             // Color picker
@@ -1387,6 +1522,12 @@
         }
 
         function renderCalendar() {
+            if (state.view === 'monthly') {
+                renderMonthly();
+                attachMonthHandlers();
+                return;
+            }
+
             const visibleDays = state.showWeekends ? days : days.slice(0, 5);
             const totalHours = state.endHour - state.startHour;
 
@@ -1515,6 +1656,84 @@
                     </div>
                 `;
             }).join('');
+        }
+
+        function renderMonthly() {
+            const ref = state.monthDate;
+            const year = ref.getFullYear();
+            const month = ref.getMonth();
+            const today = new Date();
+
+            const firstDay = new Date(year, month, 1);
+            // JS getDay(): 0=Sun..6=Sat. Convert to Monday-first index (0=Mon..6=Sun)
+            const startOffset = (firstDay.getDay() + 6) % 7;
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
+
+            const maxShow = 3;
+            let cells = '';
+            for (let i = 0; i < totalCells; i++) {
+                const dayOffset = i - startOffset;
+                const cellDate = new Date(year, month, dayOffset + 1);
+                const inMonth = cellDate.getMonth() === month;
+                const weekdayIdx = (cellDate.getDay() + 6) % 7; // 0=Mon
+                const dayKey = days[weekdayIdx];
+                const isToday = cellDate.toDateString() === today.toDateString();
+
+                const dayEvents = [...(state.events[dayKey] || [])]
+                    .sort((a, b) => a.start.localeCompare(b.start));
+
+                let eventsHtml = dayEvents.slice(0, maxShow).map(ev => `
+                    <div class="month-event" data-id="${ev.id}" data-day="${dayKey}"
+                         title="${formatTime(ev.start)} - ${formatTime(ev.end)} ${ev.title}"
+                         style="background: ${hexToRgba(ev.color, 0.18)};
+                                border-left-color: ${ev.color};
+                                color: ${darkenColor(ev.color, 0.3)};">
+                        ${formatTime(ev.start)} ${ev.title}
+                    </div>
+                `).join('');
+                if (dayEvents.length > maxShow) {
+                    eventsHtml += `<div class="month-more">+${dayEvents.length - maxShow} more</div>`;
+                }
+
+                cells += `
+                    <div class="month-cell ${inMonth ? '' : 'other-month'} ${isToday ? 'today' : ''}" data-day="${dayKey}">
+                        <div class="month-date">${cellDate.getDate()}</div>
+                        ${eventsHtml}
+                    </div>
+                `;
+            }
+
+            const weekdaysHtml = dayNamesShort.map(w => `<div class="month-weekday">${w}</div>`).join('');
+            document.getElementById('monthLabel').textContent =
+                ref.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+            calendarGrid.innerHTML = `
+                <div class="month-grid">
+                    <div class="month-weekdays">${weekdaysHtml}</div>
+                    <div class="month-weeks">${cells}</div>
+                </div>
+            `;
+        }
+
+        function attachMonthHandlers() {
+            document.querySelectorAll('.month-event').forEach(el => {
+                el.addEventListener('click', (e) => {
+                    if (state.viewOnly) return;
+                    e.stopPropagation();
+                    const id = el.dataset.id;
+                    const day = el.dataset.day;
+                    const event = (state.events[day] || []).find(ev => String(ev.id) === String(id));
+                    if (event) openEventModal(event, day);
+                });
+            });
+
+            document.querySelectorAll('.month-cell').forEach(cell => {
+                cell.addEventListener('click', () => {
+                    if (state.viewOnly) return;
+                    openEventModal(null, cell.dataset.day);
+                });
+            });
         }
 
         function getEventPosition(event) {
