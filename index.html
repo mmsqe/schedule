@@ -1222,6 +1222,12 @@
         // LocalStorage functions
         const STORAGE_KEY = 'schedulemaker_data';
 
+        // Each room caches its own data so switching rooms never shows another
+        // room's events. Standalone (no room) uses the base key.
+        function currentStorageKey() {
+            return state.syncRoomId ? STORAGE_KEY + '_' + state.syncRoomId : STORAGE_KEY;
+        }
+
         function saveState() {
             const dataToSave = {
                 events: state.events,
@@ -1230,7 +1236,7 @@
                 showWeekends: state.showWeekends,
                 title: state.title
             };
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+            localStorage.setItem(currentStorageKey(), JSON.stringify(dataToSave));
 
             // Sync to Firebase if connected
             if (state.syncRoomId) {
@@ -1256,7 +1262,7 @@
         }
 
         function loadState() {
-            const saved = localStorage.getItem(STORAGE_KEY);
+            const saved = localStorage.getItem(currentStorageKey());
             if (saved) {
                 try {
                     const data = JSON.parse(saved);
@@ -1372,7 +1378,18 @@
         init();
 
         function init() {
-            // Always load localStorage first (for local events)
+            // Resolve which room we're in BEFORE loading the cache, so each room
+            // reads its own cache instead of a single shared one.
+            const params = new URLSearchParams(window.location.search);
+            const urlRoom = params.get('room');
+            const savedRoom = localStorage.getItem('schedulemaker_syncRoom');
+            if (urlRoom) {
+                state.syncRoomId = urlRoom.toUpperCase();
+            } else if (savedRoom) {
+                state.syncRoomId = savedRoom;
+            }
+
+            // Load this room's (or standalone) cached data first
             loadState();
 
             // Then check URL for room/key
@@ -2100,9 +2117,10 @@
                 database.ref('rooms/' + state.syncRoomId).off('value', syncListener);
             }
 
-            // Save local events before joining (in case we need to push them)
+            // Snapshot local events ONLY to migrate them into a room we explicitly
+            // create. We must never push these into a room we're merely joining,
+            // or every empty room ends up with the same data.
             const localEvents = JSON.parse(JSON.stringify(state.events));
-            const hasLocalEvents = days.some(d => localEvents[d] && localEvents[d].length > 0);
 
             state.syncRoomId = roomId;
 
@@ -2112,37 +2130,71 @@
             // Check room and decide whether to push or pull
             database.ref('rooms/' + roomId).once('value', (snapshot) => {
                 const data = snapshot.val();
-                const hasRemoteEvents = data && data.events && days.some(d => data.events[d] && data.events[d].length > 0);
+                const roomExists = !!data;
 
-                if (isNewRoom || (!hasRemoteEvents && hasLocalEvents)) {
-                    // Creating new room - use provided key or generate new one
+                if (isNewRoom) {
+                    // Explicitly creating a room (Share / Create button) - seed it
+                    // with the current local events and take edit access.
+                    state.events = localEvents;
                     state.editKey = editKey || generateEditKey();
                     state.viewOnly = false;
                     localStorage.setItem('schedulemaker_editKey_' + roomId, state.editKey);
                     syncToFirebase();
-                } else if (data && data.editKey) {
-                    // Existing room - verify edit key
-                    if (editKey) {
-                        // Key provided in URL - only accept exact match
-                        if (editKey === data.editKey) {
-                            state.viewOnly = false;
-                            state.editKey = editKey;
-                            localStorage.setItem('schedulemaker_editKey_' + roomId, editKey);
+                } else if (!roomExists) {
+                    // Joining a room code that doesn't exist remotely. Seed it with
+                    // this room's own cache (empty on a first visit; your data if you
+                    // previously owned it and it was lost server-side). Because the
+                    // cache is per-room, this can't leak another room's events.
+                    state.events = localEvents;
+                    state.editKey = editKey
+                        || localStorage.getItem('schedulemaker_editKey_' + roomId)
+                        || generateEditKey();
+                    state.viewOnly = false;
+                    localStorage.setItem('schedulemaker_editKey_' + roomId, state.editKey);
+                    syncToFirebase();
+                } else {
+                    // Joining an existing room - the room is the source of truth.
+                    // Verify edit key for permissions.
+                    if (data.editKey) {
+                        if (editKey) {
+                            // Key provided in URL - only accept exact match
+                            if (editKey === data.editKey) {
+                                state.viewOnly = false;
+                                state.editKey = editKey;
+                                localStorage.setItem('schedulemaker_editKey_' + roomId, editKey);
+                            } else {
+                                state.viewOnly = true;
+                                state.editKey = null;
+                            }
                         } else {
-                            state.viewOnly = true;
-                            state.editKey = null;
-                        }
-                    } else {
-                        // No key in URL - check localStorage for saved key
-                        const savedKey = localStorage.getItem('schedulemaker_editKey_' + roomId);
-                        if (savedKey && savedKey === data.editKey) {
-                            state.viewOnly = false;
-                            state.editKey = savedKey;
-                        } else {
-                            state.viewOnly = true;
-                            state.editKey = null;
+                            // No key in URL - check localStorage for saved key
+                            const savedKey = localStorage.getItem('schedulemaker_editKey_' + roomId);
+                            if (savedKey && savedKey === data.editKey) {
+                                state.viewOnly = false;
+                                state.editKey = savedKey;
+                            } else {
+                                state.viewOnly = true;
+                                state.editKey = null;
+                            }
                         }
                     }
+
+                    // Replace local state with this room's data, clearing any stale
+                    // events left over from a different room.
+                    days.forEach(d => state.events[d] = (data.events && data.events[d]) || []);
+                    if (data.startHour) state.startHour = data.startHour;
+                    if (data.endHour) state.endHour = data.endHour;
+                    if (typeof data.showWeekends === 'boolean') state.showWeekends = data.showWeekends;
+                    if (data.title) state.title = data.title;
+                    localStorage.setItem(currentStorageKey(), JSON.stringify({
+                        events: state.events,
+                        startHour: state.startHour,
+                        endHour: state.endHour,
+                        showWeekends: state.showWeekends,
+                        title: state.title
+                    }));
+                    renderCalendar();
+                    updateTitle();
                 }
 
                 // Update UI after permission check
@@ -2159,20 +2211,19 @@
             syncListener = database.ref('rooms/' + roomId).on('value', (snapshot) => {
                 const data = snapshot.val();
                 if (data) {
-                    // Update local state from Firebase
-                    if (data.events) {
-                        // Ensure all days exist (Firebase drops empty arrays)
-                        days.forEach(day => {
-                            state.events[day] = data.events[day] || [];
-                        });
-                    }
+                    // Update local state from Firebase. Always reset every day from
+                    // the remote payload (Firebase drops empty arrays) so events
+                    // deleted remotely don't linger locally.
+                    days.forEach(day => {
+                        state.events[day] = (data.events && data.events[day]) || [];
+                    });
                     if (data.startHour) state.startHour = data.startHour;
                     if (data.endHour) state.endHour = data.endHour;
                     if (typeof data.showWeekends === 'boolean') state.showWeekends = data.showWeekends;
                     if (data.title) state.title = data.title;
 
                     // Save to localStorage
-                    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                    localStorage.setItem(currentStorageKey(), JSON.stringify({
                         events: state.events,
                         startHour: state.startHour,
                         endHour: state.endHour,
