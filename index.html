@@ -1029,6 +1029,19 @@
                     </div>
                 </div>
                 <div class="form-group">
+                    <label>Date Range <span style="font-weight:400; color:#999; font-size:0.8rem;">(optional — leave empty to repeat every week)</span></label>
+                    <div class="time-inputs">
+                        <div>
+                            <label style="font-size: 0.8rem; color: #888;">From</label>
+                            <input type="date" id="eventStartDate">
+                        </div>
+                        <div>
+                            <label style="font-size: 0.8rem; color: #888;">Until</label>
+                            <input type="date" id="eventEndDate">
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group">
                     <label>Color</label>
                     <div class="color-picker-grid" id="colorPicker">
                         <div class="color-option selected" data-color="#4A90A4" style="background: #4A90A4;"></div>
@@ -1364,7 +1377,9 @@
                         l: e.location,
                         s: e.start,
                         e: e.end,
-                        c: e.color
+                        c: e.color,
+                        sd: e.startDate || '',
+                        ed: e.endDate || ''
                     }));
                 }
             });
@@ -1415,7 +1430,9 @@
                                     location: e.l || '',
                                     start: e.s,
                                     end: e.e,
-                                    color: e.c
+                                    color: e.c,
+                                    startDate: e.sd || '',
+                                    endDate: e.ed || ''
                                 }));
                             }
                         });
@@ -1628,24 +1645,25 @@
             }
 
             if (state.view === 'weekly') {
-                // Weekly view
-                const today = new Date().toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+                // Weekly view - the week containing today, with real dates
+                const todayYMD = toYMD(new Date());
 
                 let dayColumns = '';
                 visibleDays.forEach((day, index) => {
-                    const isToday = day === today;
                     const dayIndex = days.indexOf(day);
+                    const colDate = dateForWeekday(day);
+                    const isToday = toYMD(colDate) === todayYMD;
 
                     let hourSlots = '';
                     for (let h = state.startHour; h < state.endHour; h++) {
                         hourSlots += `<div class="hour-slot" data-day="${day}" data-hour="${h}"></div>`;
                     }
 
-                    const events = renderDayEvents(day);
+                    const events = renderDayEvents(day, colDate);
 
                     dayColumns += `
                         <div class="day-column">
-                            <div class="day-header ${isToday ? 'today' : ''}">${dayNamesShort[dayIndex]}</div>
+                            <div class="day-header ${isToday ? 'today' : ''}">${dayNamesShort[dayIndex]} <span style="font-weight:400; opacity:0.7;">${colDate.getDate()}</span></div>
                             <div class="day-events" style="height: ${totalHours * 60}px;">
                                 ${hourSlots}
                                 ${events}
@@ -1662,15 +1680,17 @@
                     <div class="days-container">${dayColumns}</div>
                 `;
             } else {
-                // Daily view
+                // Daily view - the selected weekday within the current week
                 const dayIndex = days.indexOf(state.currentDay);
+                const colDate = dateForWeekday(state.currentDay);
+                const dateLabel = colDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
                 let hourSlots = '';
                 for (let h = state.startHour; h < state.endHour; h++) {
                     hourSlots += `<div class="hour-slot" data-day="${state.currentDay}" data-hour="${h}"></div>`;
                 }
 
-                const events = renderDayEvents(state.currentDay);
+                const events = renderDayEvents(state.currentDay, colDate);
 
                 calendarGrid.innerHTML = `
                     <div class="time-column">
@@ -1679,7 +1699,7 @@
                     </div>
                     <div class="days-container">
                         <div class="day-column" style="flex: 1;">
-                            <div class="day-header">${dayNames[dayIndex]}</div>
+                            <div class="day-header">${dayNames[dayIndex]} <span style="font-weight:400; opacity:0.7;">${dateLabel}</span></div>
                             <div class="day-events" style="height: ${totalHours * 60}px;">
                                 ${hourSlots}
                                 ${events}
@@ -1720,8 +1740,44 @@
             initDragHandlers();
         }
 
-        function renderDayEvents(day) {
-            const events = state.events[day] || [];
+        // --- Date helpers for per-event start/end date ranges ---
+        function toYMD(date) {
+            const y = date.getFullYear();
+            const m = (date.getMonth() + 1).toString().padStart(2, '0');
+            const d = date.getDate().toString().padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+
+        // Monday (00:00) of the week containing the given date
+        function startOfWeek(date) {
+            const d = new Date(date);
+            const offset = (d.getDay() + 6) % 7; // 0=Mon
+            d.setDate(d.getDate() - offset);
+            d.setHours(0, 0, 0, 0);
+            return d;
+        }
+
+        // Real date for a weekday key within the current week
+        function dateForWeekday(dayKey) {
+            const monday = startOfWeek(new Date());
+            const idx = days.indexOf(dayKey);
+            const d = new Date(monday);
+            d.setDate(d.getDate() + idx);
+            return d;
+        }
+
+        // Is an event active on a given date? No range = always active.
+        function eventActiveOnDate(event, date) {
+            if (!event.startDate && !event.endDate) return true;
+            const ymd = toYMD(date);
+            if (event.startDate && ymd < event.startDate) return false;
+            if (event.endDate && ymd > event.endDate) return false;
+            return true;
+        }
+
+        function renderDayEvents(day, date = null) {
+            let events = state.events[day] || [];
+            if (date) events = events.filter(ev => eventActiveOnDate(ev, date));
             if (events.length === 0) return '';
 
             return events.map(event => {
@@ -1729,16 +1785,18 @@
                 const sizeClass = height < 40 ? 'tiny' : height < 60 ? 'small' : '';
                 const bgColor = hexToRgba(event.color, 0.2);
                 const textColor = darkenColor(event.color, 0.3);
+                const dated = event.startDate || event.endDate;
 
                 return `
                     <div class="event-block ${sizeClass}"
                          data-id="${event.id}"
                          data-day="${day}"
+                         title="${dated ? 'Active ' + (event.startDate || '…') + ' to ' + (event.endDate || '…') : ''}"
                          style="top: ${top}px; height: ${height}px;
                                 background: ${bgColor};
                                 border-left-color: ${event.color};
                                 color: ${textColor};">
-                        <div class="event-title">${event.title}</div>
+                        <div class="event-title">${dated ? '📅 ' : ''}${event.title}</div>
                         ${event.location ? `<div class="event-location">${event.location}</div>` : ''}
                         <div class="event-time">${formatTime(event.start)} - ${formatTime(event.end)}</div>
                     </div>
@@ -1768,7 +1826,8 @@
                 const dayKey = days[weekdayIdx];
                 const isToday = cellDate.toDateString() === today.toDateString();
 
-                const dayEvents = [...(state.events[dayKey] || [])]
+                const dayEvents = (state.events[dayKey] || [])
+                    .filter(ev => eventActiveOnDate(ev, cellDate))
                     .sort((a, b) => a.start.localeCompare(b.start));
 
                 let eventsHtml = dayEvents.slice(0, maxShow).map(ev => `
@@ -1877,11 +1936,15 @@
                 document.getElementById('eventDay').value = day;
                 document.getElementById('eventStart').value = event.start;
                 document.getElementById('eventEnd').value = event.end;
+                document.getElementById('eventStartDate').value = event.startDate || '';
+                document.getElementById('eventEndDate').value = event.endDate || '';
                 selectColor(event.color);
             } else {
                 document.getElementById('eventTitle').value = '';
                 document.getElementById('eventLocation').value = '';
                 document.getElementById('eventDay').value = day || state.currentDay;
+                document.getElementById('eventStartDate').value = '';
+                document.getElementById('eventEndDate').value = '';
 
                 if (hour !== null) {
                     const startTime = `${hour.toString().padStart(2, '0')}:00`;
@@ -1918,6 +1981,8 @@
             const day = document.getElementById('eventDay').value;
             const start = document.getElementById('eventStart').value;
             const end = document.getElementById('eventEnd').value;
+            const startDate = document.getElementById('eventStartDate').value;
+            const endDate = document.getElementById('eventEndDate').value;
 
             if (!title) {
                 alert('Please enter an event title');
@@ -1926,6 +1991,11 @@
 
             if (start >= end) {
                 alert('End time must be after start time');
+                return;
+            }
+
+            if (startDate && endDate && startDate > endDate) {
+                alert('End date must be on or after start date');
                 return;
             }
 
@@ -1969,7 +2039,9 @@
                         location,
                         start,
                         end,
-                        color: state.selectedColor
+                        color: state.selectedColor,
+                        startDate,
+                        endDate
                     });
                 }
             } else {
@@ -1980,7 +2052,9 @@
                     location,
                     start,
                     end,
-                    color: state.selectedColor
+                    color: state.selectedColor,
+                    startDate,
+                    endDate
                 };
                 state.events[day].push(newEvent);
             }
@@ -2024,7 +2098,9 @@
                     location: event.location,
                     start: event.start,
                     end: event.end,
-                    color: event.color
+                    color: event.color,
+                    startDate: event.startDate || '',
+                    endDate: event.endDate || ''
                 };
                 closeEventModal();
                 // Show brief feedback
@@ -2041,6 +2117,8 @@
             document.getElementById('eventLocation').value = state.copiedEvent.location || '';
             document.getElementById('eventStart').value = state.copiedEvent.start;
             document.getElementById('eventEnd').value = state.copiedEvent.end;
+            document.getElementById('eventStartDate').value = state.copiedEvent.startDate || '';
+            document.getElementById('eventEndDate').value = state.copiedEvent.endDate || '';
             selectColor(state.copiedEvent.color);
         }
 
@@ -2600,9 +2678,9 @@
 
             switch (format) {
                 case 'csv':
-                    content = 'Day,Start,End,Title,Location\n';
+                    content = 'Day,Start,End,Title,Location,From Date,Until Date\n';
                     content += allEvents.map(e =>
-                        `${e.day},${e.start},${e.end},"${e.title}","${e.location || ''}"`
+                        `${e.day},${e.start},${e.end},"${e.title}","${e.location || ''}",${e.startDate || ''},${e.endDate || ''}`
                     ).join('\n');
                     filename += '.csv';
                     mimeType = 'text/csv';
@@ -2619,9 +2697,12 @@
                         if (dayEvents.length > 0) {
                             const dayIndex = days.indexOf(day);
                             content += `## ${dayNames[dayIndex]}\n\n`;
-                            content += '| Time | Event | Location |\n|------|-------|----------|\n';
+                            content += '| Time | Event | Location | Dates |\n|------|-------|----------|-------|\n';
                             dayEvents.forEach(e => {
-                                content += `| ${formatTime(e.start)} - ${formatTime(e.end)} | ${e.title} | ${e.location || '-'} |\n`;
+                                const range = (e.startDate || e.endDate)
+                                    ? `${e.startDate || '…'} → ${e.endDate || '…'}`
+                                    : 'Every week';
+                                content += `| ${formatTime(e.start)} - ${formatTime(e.end)} | ${e.title} | ${e.location || '-'} | ${range} |\n`;
                             });
                             content += '\n';
                         }
