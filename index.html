@@ -925,6 +925,11 @@
                     <button class="day-btn" data-day="saturday">Sat</button>
                     <button class="day-btn" data-day="sunday">Sun</button>
                 </div>
+                <div class="day-selector" id="weekSelector" style="display: none; align-items: center;">
+                    <button class="day-btn" id="prevWeek" title="Previous week">&lsaquo;</button>
+                    <span id="weekLabel" style="min-width: 150px; text-align: center; font-weight: 600; color: #2c3e50; cursor: pointer;" title="Jump to current week"></span>
+                    <button class="day-btn" id="nextWeek" title="Next week">&rsaquo;</button>
+                </div>
                 <div class="day-selector" id="monthSelector" style="display: none; align-items: center;">
                     <button class="day-btn" id="prevMonth" title="Previous month">&lsaquo;</button>
                     <span id="monthLabel" style="min-width: 150px; text-align: center; font-weight: 600; color: #2c3e50;"></span>
@@ -1229,6 +1234,7 @@
             view: 'weekly',
             currentDay: 'monday',
             monthDate: new Date(),
+            weekDate: new Date(),
             startHour: 7,
             endHour: 23,
             showWeekends: true,
@@ -1415,6 +1421,11 @@
                 state.currentDay = dayParam;
                 dayFromUrl = true;
             }
+            const weekParam = params.get('week');
+            if (weekParam && /^\d{4}-\d{2}-\d{2}$/.test(weekParam)) {
+                const [y, mo, d] = weekParam.split('-').map(Number);
+                state.weekDate = new Date(y, mo - 1, d);
+            }
 
             // Check for room code first (short URL)
             const roomCode = params.get('room');
@@ -1551,10 +1562,7 @@
                     viewToggleBtns.forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
                     state.view = btn.dataset.view;
-                    document.getElementById('daySelectorDaily').style.display =
-                        state.view === 'daily' ? 'flex' : 'none';
-                    document.getElementById('monthSelector').style.display =
-                        state.view === 'monthly' ? 'flex' : 'none';
+                    syncViewControls();
                     renderCalendar();
                 });
             });
@@ -1576,6 +1584,20 @@
             });
             document.getElementById('nextMonth').addEventListener('click', () => {
                 state.monthDate = new Date(state.monthDate.getFullYear(), state.monthDate.getMonth() + 1, 1);
+                renderCalendar();
+            });
+
+            // Week navigation for weekly / daily views
+            document.getElementById('prevWeek').addEventListener('click', () => {
+                state.weekDate = new Date(state.weekDate.getTime() - 7 * 86400000);
+                renderCalendar();
+            });
+            document.getElementById('nextWeek').addEventListener('click', () => {
+                state.weekDate = new Date(state.weekDate.getTime() + 7 * 86400000);
+                renderCalendar();
+            });
+            document.getElementById('weekLabel').addEventListener('click', () => {
+                state.weekDate = new Date();
                 renderCalendar();
             });
 
@@ -1644,13 +1666,28 @@
             });
         }
 
-        // Reflect state.view in the toggle buttons and day/month selectors
+        // Reflect state.view in the toggle buttons and day/week/month selectors
         function syncViewControls() {
             viewToggleBtns.forEach(b => b.classList.toggle('active', b.dataset.view === state.view));
             document.getElementById('daySelectorDaily').style.display =
                 state.view === 'daily' ? 'flex' : 'none';
+            document.getElementById('weekSelector').style.display =
+                (state.view === 'weekly' || state.view === 'daily') ? 'flex' : 'none';
             document.getElementById('monthSelector').style.display =
                 state.view === 'monthly' ? 'flex' : 'none';
+        }
+
+        // Update the "Jun 8 – 14" week-range label
+        function updateWeekLabel() {
+            const monday = startOfWeek(state.weekDate);
+            const sunday = new Date(monday);
+            sunday.setDate(sunday.getDate() + 6);
+            const opts = { month: 'short', day: 'numeric' };
+            const left = monday.toLocaleDateString('en-US', opts);
+            const right = sunday.getMonth() === monday.getMonth()
+                ? sunday.getDate()
+                : sunday.toLocaleDateString('en-US', opts);
+            document.getElementById('weekLabel').textContent = `${left} – ${right}`;
         }
 
         function renderCalendar() {
@@ -1659,6 +1696,8 @@
                 attachMonthHandlers();
                 return;
             }
+
+            updateWeekLabel();
 
             const visibleDays = state.showWeekends ? days : days.slice(0, 5);
             const totalHours = state.endHour - state.startHour;
@@ -1784,9 +1823,9 @@
             return d;
         }
 
-        // Real date for a weekday key within the current week
+        // Real date for a weekday key within the currently-navigated week
         function dateForWeekday(dayKey) {
-            const monday = startOfWeek(new Date());
+            const monday = startOfWeek(state.weekDate);
             const idx = days.indexOf(dayKey);
             const d = new Date(monday);
             d.setDate(d.getDate() + idx);
@@ -2201,8 +2240,10 @@
                 const y = state.monthDate.getFullYear();
                 const m = (state.monthDate.getMonth() + 1).toString().padStart(2, '0');
                 p += '&month=' + y + '-' + m;
-            } else if (state.view === 'daily') {
-                p += '&day=' + state.currentDay;
+            } else {
+                // weekly / daily: carry the displayed week (Monday) and, for daily, the day
+                p += '&week=' + toYMD(startOfWeek(state.weekDate));
+                if (state.view === 'daily') p += '&day=' + state.currentDay;
             }
             return p;
         }
