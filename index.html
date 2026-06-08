@@ -1395,9 +1395,26 @@
         }
 
         let joiningFromUrl = false;
+        let dayFromUrl = false;
 
         function loadFromUrl() {
             const params = new URLSearchParams(window.location.search);
+
+            // View state (applies to room, legacy, and plain URLs)
+            const view = params.get('view');
+            if (view === 'weekly' || view === 'daily' || view === 'monthly') {
+                state.view = view;
+            }
+            const monthParam = params.get('month');
+            if (monthParam && /^\d{4}-\d{2}$/.test(monthParam)) {
+                const [y, m] = monthParam.split('-').map(Number);
+                state.monthDate = new Date(y, m - 1, 1);
+            }
+            const dayParam = params.get('day');
+            if (dayParam && days.includes(dayParam)) {
+                state.currentDay = dayParam;
+                dayFromUrl = true;
+            }
 
             // Check for room code first (short URL)
             const roomCode = params.get('room');
@@ -1489,6 +1506,7 @@
             renderCalendar();
             setupEventListeners();
             setActiveDay();
+            syncViewControls();
             // Auto-reconnect to Firebase sync room if previously connected
             autoReconnectSync();
             // Update UI for view-only mode
@@ -1617,13 +1635,22 @@
         }
 
         function setActiveDay() {
-            const today = new Date().toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
-            state.currentDay = today;
+            // Keep a URL-specified day; otherwise default to today
+            if (!dayFromUrl) {
+                state.currentDay = new Date().toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+            }
             dayBtns.forEach(btn => {
-                if (btn.dataset.day === today) {
-                    btn.classList.add('active');
-                }
+                btn.classList.toggle('active', btn.dataset.day === state.currentDay);
             });
+        }
+
+        // Reflect state.view in the toggle buttons and day/month selectors
+        function syncViewControls() {
+            viewToggleBtns.forEach(b => b.classList.toggle('active', b.dataset.view === state.view));
+            document.getElementById('daySelectorDaily').style.display =
+                state.view === 'daily' ? 'flex' : 'none';
+            document.getElementById('monthSelector').style.display =
+                state.view === 'monthly' ? 'flex' : 'none';
         }
 
         function renderCalendar() {
@@ -2168,14 +2195,27 @@
             shareModal.classList.add('active');
         }
 
+        function currentViewParams() {
+            let p = '&view=' + state.view;
+            if (state.view === 'monthly') {
+                const y = state.monthDate.getFullYear();
+                const m = (state.monthDate.getMonth() + 1).toString().padStart(2, '0');
+                p += '&month=' + y + '-' + m;
+            } else if (state.view === 'daily') {
+                p += '&day=' + state.currentDay;
+            }
+            return p;
+        }
+
         function showShareUrls(roomId) {
             const baseUrl = window.location.origin + window.location.pathname;
+            const vp = currentViewParams();
             if (state.editKey) {
-                document.getElementById('shareUrlEdit').value = baseUrl + '?room=' + roomId + '&key=' + state.editKey;
+                document.getElementById('shareUrlEdit').value = baseUrl + '?room=' + roomId + '&key=' + state.editKey + vp;
             } else {
                 document.getElementById('shareUrlEdit').value = 'No edit access';
             }
-            document.getElementById('shareUrlView').value = baseUrl + '?room=' + roomId;
+            document.getElementById('shareUrlView').value = baseUrl + '?room=' + roomId + vp;
             document.getElementById('copyStatus').style.display = 'none';
         }
 
