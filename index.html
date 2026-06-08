@@ -532,6 +532,41 @@
             font-size: 0.9rem;
         }
 
+        /* Sync Toast */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: #2c3e50;
+            color: #fff;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.25s, transform 0.25s, visibility 0.25s;
+            z-index: 2000;
+            max-width: 90%;
+            text-align: center;
+        }
+
+        .toast.show {
+            opacity: 1;
+            visibility: visible;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .toast.success { background: #27ae60; }
+        .toast.error { background: #e74c3c; }
+        .toast.info { background: #2c3e50; }
+
+        @media (max-width: 600px) {
+            .toast { bottom: 80px; }
+        }
+
         /* View Mode Toggle */
         .view-toggle {
             display: flex;
@@ -1247,6 +1282,14 @@
         function syncToFirebase() {
             if (!state.syncRoomId || state.viewOnly) return;
 
+            // An editor must always have an edit key. Without this, Firebase drops
+            // the null value and the room ends up with synced events but no editKey,
+            // leaving nobody able to claim edit access.
+            if (!state.editKey) {
+                state.editKey = generateEditKey();
+                localStorage.setItem('schedulemaker_editKey_' + state.syncRoomId, state.editKey);
+            }
+
             const dataToSync = {
                 events: state.events,
                 startHour: state.startHour,
@@ -1258,7 +1301,35 @@
             };
 
             database.ref('rooms/' + state.syncRoomId).set(dataToSync)
-                .catch(err => console.error('Sync error:', err));
+                .then(() => showToast('Saved & synced', 'success'))
+                .catch(err => {
+                    console.error('Sync error:', err);
+                    const msg = (err && /permission/i.test(err.message || ''))
+                        ? "Couldn't sync: permission denied for this room."
+                        : "Couldn't sync to server. Changes saved locally only.";
+                    showToast(msg, 'error');
+                });
+        }
+
+        // Lightweight, non-blocking toast for sync feedback
+        let toastTimer = null;
+        function showToast(message, type = 'info') {
+            let toast = document.getElementById('toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'toast';
+                toast.className = 'toast';
+                document.body.appendChild(toast);
+            }
+            toast.textContent = message;
+            toast.classList.remove('success', 'error', 'info', 'show');
+            toast.classList.add(type);
+            // Force reflow so re-triggering the animation works
+            void toast.offsetWidth;
+            toast.classList.add('show');
+            if (toastTimer) clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => toast.classList.remove('show'),
+                type === 'error' ? 5000 : 2000);
         }
 
         function loadState() {
@@ -2178,6 +2249,17 @@
                             }
                         }
                     }
+                    let claimedKeylessRoom = false;
+                    if (!data.editKey) {
+                        // Room exists but has no edit key (legacy / malformed data).
+                        // Let this visitor claim edit access and repair it.
+                        state.viewOnly = false;
+                        state.editKey = editKey
+                            || localStorage.getItem('schedulemaker_editKey_' + roomId)
+                            || generateEditKey();
+                        localStorage.setItem('schedulemaker_editKey_' + roomId, state.editKey);
+                        claimedKeylessRoom = true;
+                    }
 
                     // Replace local state with this room's data, clearing any stale
                     // events left over from a different room.
@@ -2193,6 +2275,9 @@
                         showWeekends: state.showWeekends,
                         title: state.title
                     }));
+                    // Persist the freshly-generated key so the room is repaired now,
+                    // not only after the next edit.
+                    if (claimedKeylessRoom) syncToFirebase();
                     renderCalendar();
                     updateTitle();
                 }
