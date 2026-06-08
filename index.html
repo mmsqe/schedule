@@ -1910,7 +1910,7 @@
                 }
 
                 cells += `
-                    <div class="month-cell ${inMonth ? '' : 'other-month'} ${isToday ? 'today' : ''}" data-day="${dayKey}">
+                    <div class="month-cell ${inMonth ? '' : 'other-month'} ${isToday ? 'today' : ''}" data-day="${dayKey}" data-date="${toYMD(cellDate)}">
                         <div class="month-date">${cellDate.getDate()}</div>
                         ${eventsHtml}
                     </div>
@@ -1944,7 +1944,8 @@
             document.querySelectorAll('.month-cell').forEach(cell => {
                 cell.addEventListener('click', () => {
                     if (state.viewOnly) return;
-                    openEventModal(null, cell.dataset.day);
+                    const [y, m, d] = cell.dataset.date.split('-').map(Number);
+                    openEventModal(null, cell.dataset.day, null, new Date(y, m - 1, d));
                 });
             });
         }
@@ -1987,8 +1988,23 @@
             return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
         }
 
+        // The date currently in focus for a given view, used to default a new
+        // event's date range to where the user is looking (not today).
+        function selectedViewDate(dayKey = null) {
+            if (state.view === 'monthly') {
+                const md = state.monthDate;
+                const today = new Date();
+                // today if the displayed month is the current month, else the 1st
+                return (md.getFullYear() === today.getFullYear() && md.getMonth() === today.getMonth())
+                    ? today
+                    : new Date(md.getFullYear(), md.getMonth(), 1);
+            }
+            // weekly / daily: the date of the relevant weekday in the navigated week
+            return dateForWeekday(dayKey || state.currentDay);
+        }
+
         // Modal Functions
-        function openEventModal(event = null, day = null, hour = null) {
+        function openEventModal(event = null, day = null, hour = null, dateContext = null) {
             state.editingEventId = event ? event.id : null;
 
             document.getElementById('modalTitle').textContent = event ? 'Edit Event' : 'Add Event';
@@ -2009,7 +2025,10 @@
                 document.getElementById('eventTitle').value = '';
                 document.getElementById('eventLocation').value = '';
                 document.getElementById('eventDay').value = day || state.currentDay;
-                document.getElementById('eventStartDate').value = '';
+                // Default the date range start to the date in focus (clicked cell /
+                // column, or the current view's selected date), not today.
+                const defDate = dateContext || selectedViewDate(day);
+                document.getElementById('eventStartDate').value = defDate ? toYMD(defDate) : '';
                 document.getElementById('eventEndDate').value = '';
 
                 if (hour !== null) {
