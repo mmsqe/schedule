@@ -1262,13 +1262,16 @@
         const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
         const dayNamesShort = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+        // Shorthand for document.getElementById
+        const $ = document.getElementById.bind(document);
+
         // DOM Elements
-        const calendarGrid = document.getElementById('calendarGrid');
-        const eventModal = document.getElementById('eventModal');
-        const settingsModal = document.getElementById('settingsModal');
-        const exportModal = document.getElementById('exportModal');
-        const shareModal = document.getElementById('shareModal');
-        const syncModal = document.getElementById('syncModal');
+        const calendarGrid = $('calendarGrid');
+        const eventModal = $('eventModal');
+        const settingsModal = $('settingsModal');
+        const exportModal = $('exportModal');
+        const shareModal = $('shareModal');
+        const syncModal = $('syncModal');
         const viewToggleBtns = document.querySelectorAll('.view-toggle button');
         const dayBtns = document.querySelectorAll('.day-btn');
         const colorOptions = document.querySelectorAll('.color-option');
@@ -1282,20 +1285,34 @@
             return state.syncRoomId ? STORAGE_KEY + '_' + state.syncRoomId : STORAGE_KEY;
         }
 
-        function saveState() {
-            const dataToSave = {
+        // The persistable slice of state (shared by local cache and Firebase sync).
+        function scheduleSnapshot() {
+            return {
                 events: state.events,
                 startHour: state.startHour,
                 endHour: state.endHour,
                 showWeekends: state.showWeekends,
                 title: state.title
             };
-            localStorage.setItem(currentStorageKey(), JSON.stringify(dataToSave));
+        }
 
-            // Sync to Firebase if connected
-            if (state.syncRoomId) {
-                syncToFirebase();
-            }
+        function persistLocal() {
+            localStorage.setItem(currentStorageKey(), JSON.stringify(scheduleSnapshot()));
+        }
+
+        // Apply a loaded/synced schedule object onto state. Always resets every day
+        // (Firebase drops empty arrays) so removed events don't linger.
+        function applyScheduleData(data) {
+            days.forEach(day => state.events[day] = (data.events && data.events[day]) || []);
+            if (data.startHour) state.startHour = data.startHour;
+            if (data.endHour) state.endHour = data.endHour;
+            if (typeof data.showWeekends === 'boolean') state.showWeekends = data.showWeekends;
+            if (data.title) state.title = data.title;
+        }
+
+        function saveState() {
+            persistLocal();
+            if (state.syncRoomId) syncToFirebase();
         }
 
         function syncToFirebase() {
@@ -1310,11 +1327,7 @@
             }
 
             const dataToSync = {
-                events: state.events,
-                startHour: state.startHour,
-                endHour: state.endHour,
-                showWeekends: state.showWeekends,
-                title: state.title,
+                ...scheduleSnapshot(),
                 editKey: state.editKey,
                 lastUpdated: Date.now()
             };
@@ -1333,7 +1346,7 @@
         // Lightweight, non-blocking toast for sync feedback
         let toastTimer = null;
         function showToast(message, type = 'info') {
-            let toast = document.getElementById('toast');
+            let toast = $('toast');
             if (!toast) {
                 toast = document.createElement('div');
                 toast.id = 'toast';
@@ -1353,51 +1366,12 @@
 
         function loadState() {
             const saved = localStorage.getItem(currentStorageKey());
-            if (saved) {
-                try {
-                    const data = JSON.parse(saved);
-                    if (data.events) {
-                        // Ensure all days exist
-                        days.forEach(day => {
-                            state.events[day] = data.events[day] || [];
-                        });
-                    }
-                    if (data.startHour) state.startHour = data.startHour;
-                    if (data.endHour) state.endHour = data.endHour;
-                    if (typeof data.showWeekends === 'boolean') state.showWeekends = data.showWeekends;
-                    if (data.title) state.title = data.title;
-                } catch (e) {
-                    console.error('Failed to load saved data:', e);
-                }
+            if (!saved) return;
+            try {
+                applyScheduleData(JSON.parse(saved));
+            } catch (e) {
+                console.error('Failed to load saved data:', e);
             }
-        }
-
-        // URL Sharing functions (with LZ compression for shorter URLs)
-        function encodeScheduleToUrl() {
-            // Only include days with events to minimize data
-            const eventsToShare = {};
-            days.forEach(day => {
-                if (state.events[day] && state.events[day].length > 0) {
-                    eventsToShare[day] = state.events[day].map(e => ({
-                        t: e.title,
-                        l: e.location,
-                        s: e.start,
-                        e: e.end,
-                        c: e.color,
-                        sd: e.startDate || '',
-                        ed: e.endDate || ''
-                    }));
-                }
-            });
-
-            const dataToShare = {
-                e: eventsToShare,
-                h: [state.startHour, state.endHour],
-                w: state.showWeekends ? 1 : 0
-            };
-            const json = JSON.stringify(dataToShare);
-            const compressed = LZString.compressToEncodedURIComponent(json);
-            return window.location.origin + window.location.pathname + '?s=' + compressed;
         }
 
         let joiningFromUrl = false;
@@ -1527,8 +1501,8 @@
         }
 
         function updateViewOnlyUI() {
-            const addBtn = document.getElementById('addBtn');
-            const resetBtn = document.getElementById('resetBtn');
+            const addBtn = $('addBtn');
+            const resetBtn = $('resetBtn');
 
             if (state.viewOnly) {
                 addBtn.style.opacity = '0.5';
@@ -1578,25 +1552,25 @@
             });
 
             // Month navigation for monthly view
-            document.getElementById('prevMonth').addEventListener('click', () => {
+            $('prevMonth').addEventListener('click', () => {
                 state.monthDate = new Date(state.monthDate.getFullYear(), state.monthDate.getMonth() - 1, 1);
                 renderCalendar();
             });
-            document.getElementById('nextMonth').addEventListener('click', () => {
+            $('nextMonth').addEventListener('click', () => {
                 state.monthDate = new Date(state.monthDate.getFullYear(), state.monthDate.getMonth() + 1, 1);
                 renderCalendar();
             });
 
             // Week navigation for weekly / daily views
-            document.getElementById('prevWeek').addEventListener('click', () => {
+            $('prevWeek').addEventListener('click', () => {
                 state.weekDate = new Date(state.weekDate.getTime() - 7 * 86400000);
                 renderCalendar();
             });
-            document.getElementById('nextWeek').addEventListener('click', () => {
+            $('nextWeek').addEventListener('click', () => {
                 state.weekDate = new Date(state.weekDate.getTime() + 7 * 86400000);
                 renderCalendar();
             });
-            document.getElementById('weekLabel').addEventListener('click', () => {
+            $('weekLabel').addEventListener('click', () => {
                 state.weekDate = new Date();
                 renderCalendar();
             });
@@ -1611,18 +1585,18 @@
             });
 
             // Sidebar buttons
-            document.getElementById('addBtn').addEventListener('click', () => {
+            $('addBtn').addEventListener('click', () => {
                 if (state.viewOnly) {
                     alert('View-only mode. You cannot add events.');
                     return;
                 }
                 openEventModal();
             });
-            document.getElementById('settingsBtn').addEventListener('click', () => openSettingsModal());
-            document.getElementById('shareBtn').addEventListener('click', () => openShareModal());
-            document.getElementById('syncBtn').addEventListener('click', () => openSyncModal());
-            document.getElementById('exportBtn').addEventListener('click', () => openExportModal());
-            document.getElementById('resetBtn').addEventListener('click', () => {
+            $('settingsBtn').addEventListener('click', () => openSettingsModal());
+            $('shareBtn').addEventListener('click', () => openShareModal());
+            $('syncBtn').addEventListener('click', () => openSyncModal());
+            $('exportBtn').addEventListener('click', () => openExportModal());
+            $('resetBtn').addEventListener('click', () => {
                 if (state.viewOnly) {
                     alert('View-only mode. You cannot reset.');
                     return;
@@ -1631,12 +1605,12 @@
             });
 
             // Modal buttons
-            document.getElementById('modalClose').addEventListener('click', closeEventModal);
-            document.getElementById('cancelEvent').addEventListener('click', closeEventModal);
-            document.getElementById('saveEvent').addEventListener('click', saveEvent);
-            document.getElementById('deleteEvent').addEventListener('click', deleteEvent);
-            document.getElementById('copyEvent').addEventListener('click', copyEvent);
-            document.getElementById('pasteEvent').addEventListener('click', pasteEvent);
+            $('modalClose').addEventListener('click', closeEventModal);
+            $('cancelEvent').addEventListener('click', closeEventModal);
+            $('saveEvent').addEventListener('click', saveEvent);
+            $('deleteEvent').addEventListener('click', deleteEvent);
+            $('copyEvent').addEventListener('click', copyEvent);
+            $('pasteEvent').addEventListener('click', pasteEvent);
 
             // Close modals on overlay click
             eventModal.addEventListener('click', (e) => {
@@ -1669,11 +1643,11 @@
         // Reflect state.view in the toggle buttons and day/week/month selectors
         function syncViewControls() {
             viewToggleBtns.forEach(b => b.classList.toggle('active', b.dataset.view === state.view));
-            document.getElementById('daySelectorDaily').style.display =
+            $('daySelectorDaily').style.display =
                 state.view === 'daily' ? 'flex' : 'none';
-            document.getElementById('weekSelector').style.display =
+            $('weekSelector').style.display =
                 (state.view === 'weekly' || state.view === 'daily') ? 'flex' : 'none';
-            document.getElementById('monthSelector').style.display =
+            $('monthSelector').style.display =
                 state.view === 'monthly' ? 'flex' : 'none';
         }
 
@@ -1687,7 +1661,7 @@
             const right = sunday.getMonth() === monday.getMonth()
                 ? sunday.getDate()
                 : sunday.toLocaleDateString('en-US', opts);
-            document.getElementById('weekLabel').textContent = `${left} – ${right}`;
+            $('weekLabel').textContent = `${left} – ${right}`;
         }
 
         function renderCalendar() {
@@ -1918,7 +1892,7 @@
             }
 
             const weekdaysHtml = dayNamesShort.map(w => `<div class="month-weekday">${w}</div>`).join('');
-            document.getElementById('monthLabel').textContent =
+            $('monthLabel').textContent =
                 ref.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
             calendarGrid.innerHTML = `
@@ -2007,45 +1981,45 @@
         function openEventModal(event = null, day = null, hour = null, dateContext = null) {
             state.editingEventId = event ? event.id : null;
 
-            document.getElementById('modalTitle').textContent = event ? 'Edit Event' : 'Add Event';
-            document.getElementById('deleteEvent').style.display = event ? 'inline-block' : 'none';
-            document.getElementById('copyEvent').style.display = event ? 'inline-block' : 'none';
-            document.getElementById('pasteEvent').style.display = (!event && state.copiedEvent) ? 'inline-block' : 'none';
+            $('modalTitle').textContent = event ? 'Edit Event' : 'Add Event';
+            $('deleteEvent').style.display = event ? 'inline-block' : 'none';
+            $('copyEvent').style.display = event ? 'inline-block' : 'none';
+            $('pasteEvent').style.display = (!event && state.copiedEvent) ? 'inline-block' : 'none';
 
             if (event) {
-                document.getElementById('eventTitle').value = event.title;
-                document.getElementById('eventLocation').value = event.location || '';
-                document.getElementById('eventDay').value = day;
-                document.getElementById('eventStart').value = event.start;
-                document.getElementById('eventEnd').value = event.end;
-                document.getElementById('eventStartDate').value = event.startDate || '';
-                document.getElementById('eventEndDate').value = event.endDate || '';
+                $('eventTitle').value = event.title;
+                $('eventLocation').value = event.location || '';
+                $('eventDay').value = day;
+                $('eventStart').value = event.start;
+                $('eventEnd').value = event.end;
+                $('eventStartDate').value = event.startDate || '';
+                $('eventEndDate').value = event.endDate || '';
                 selectColor(event.color);
             } else {
-                document.getElementById('eventTitle').value = '';
-                document.getElementById('eventLocation').value = '';
-                document.getElementById('eventDay').value = day || state.currentDay;
+                $('eventTitle').value = '';
+                $('eventLocation').value = '';
+                $('eventDay').value = day || state.currentDay;
                 // Default the date range start to the date in focus (clicked cell /
                 // column, or the current view's selected date), not today.
                 const defDate = dateContext || selectedViewDate(day);
-                document.getElementById('eventStartDate').value = defDate ? toYMD(defDate) : '';
-                document.getElementById('eventEndDate').value = '';
+                $('eventStartDate').value = defDate ? toYMD(defDate) : '';
+                $('eventEndDate').value = '';
 
                 if (hour !== null) {
                     const startTime = `${hour.toString().padStart(2, '0')}:00`;
                     const endHour = Math.min(hour + 1, state.endHour);
                     const endTime = `${endHour.toString().padStart(2, '0')}:00`;
-                    document.getElementById('eventStart').value = startTime;
-                    document.getElementById('eventEnd').value = endTime;
+                    $('eventStart').value = startTime;
+                    $('eventEnd').value = endTime;
                 } else {
-                    document.getElementById('eventStart').value = '09:00';
-                    document.getElementById('eventEnd').value = '10:00';
+                    $('eventStart').value = '09:00';
+                    $('eventEnd').value = '10:00';
                 }
                 selectColor('#4A90A4');
             }
 
             eventModal.classList.add('active');
-            document.getElementById('eventTitle').focus();
+            $('eventTitle').focus();
         }
 
         function closeEventModal() {
@@ -2060,88 +2034,42 @@
             });
         }
 
+        // Read the event modal fields. `day` is the target day; the rest form the
+        // stored event object.
+        function readEventForm() {
+            const { day, ...event } = {
+                day: $('eventDay').value,
+                title: $('eventTitle').value.trim(),
+                location: $('eventLocation').value.trim(),
+                start: $('eventStart').value,
+                end: $('eventEnd').value,
+                color: state.selectedColor,
+                startDate: $('eventStartDate').value,
+                endDate: $('eventEndDate').value
+            };
+            return { day, event };
+        }
+
         function saveEvent() {
-            const title = document.getElementById('eventTitle').value.trim();
-            const location = document.getElementById('eventLocation').value.trim();
-            const day = document.getElementById('eventDay').value;
-            const start = document.getElementById('eventStart').value;
-            const end = document.getElementById('eventEnd').value;
-            const startDate = document.getElementById('eventStartDate').value;
-            const endDate = document.getElementById('eventEndDate').value;
+            const { day, event } = readEventForm();
 
-            if (!title) {
-                alert('Please enter an event title');
-                return;
-            }
-
-            if (start >= end) {
-                alert('End time must be after start time');
-                return;
-            }
-
-            if (startDate && endDate && startDate > endDate) {
+            if (!event.title) { alert('Please enter an event title'); return; }
+            if (event.start >= event.end) { alert('End time must be after start time'); return; }
+            if (event.startDate && event.endDate && event.startDate > event.endDate) {
                 alert('End date must be on or after start date');
                 return;
             }
 
-            // Ensure day array exists
-            if (!state.events[day]) {
-                state.events[day] = [];
-            }
+            if (!state.events[day]) state.events[day] = [];
 
             if (state.editingEventId) {
-                // Update existing event - find which day it's currently in
-                let foundDay = null;
-                let eventIndex = -1;
-
-                // First check selected day (compare as strings for Firebase compatibility)
-                if (state.events[day]) {
-                    eventIndex = state.events[day].findIndex(e => String(e.id) === String(state.editingEventId));
-                    if (eventIndex !== -1) foundDay = day;
-                }
-
-                // If not found, search all days (event might have been on different day)
-                if (foundDay === null) {
-                    for (const d of days) {
-                        if (state.events[d]) {
-                            const idx = state.events[d].findIndex(e => String(e.id) === String(state.editingEventId));
-                            if (idx !== -1) {
-                                foundDay = d;
-                                eventIndex = idx;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if (foundDay !== null && eventIndex !== -1) {
-                    // Remove from old day
-                    state.events[foundDay].splice(eventIndex, 1);
-                    // Add to new day (might be same or different)
-                    state.events[day].push({
-                        id: state.editingEventId,
-                        title,
-                        location,
-                        start,
-                        end,
-                        color: state.selectedColor,
-                        startDate,
-                        endDate
-                    });
-                }
+                // Remove from wherever it currently lives (day may have changed)...
+                const loc = findEventLocation(state.editingEventId);
+                if (loc) state.events[loc.day].splice(loc.index, 1);
+                // ...and re-add to the selected day, keeping its id.
+                state.events[day].push({ id: state.editingEventId, ...event });
             } else {
-                // Add new event
-                const newEvent = {
-                    id: Date.now(),
-                    title,
-                    location,
-                    start,
-                    end,
-                    color: state.selectedColor,
-                    startDate,
-                    endDate
-                };
-                state.events[day].push(newEvent);
+                state.events[day].push({ id: Date.now(), ...event });
             }
 
             closeEventModal();
@@ -2152,16 +2080,8 @@
         function deleteEvent() {
             if (!state.editingEventId) return;
 
-            // Search all days for the event
-            for (const day of days) {
-                if (state.events[day]) {
-                    const idx = state.events[day].findIndex(e => String(e.id) === String(state.editingEventId));
-                    if (idx !== -1) {
-                        state.events[day].splice(idx, 1);
-                        break;
-                    }
-                }
-            }
+            const loc = findEventLocation(state.editingEventId);
+            if (loc) state.events[loc.day].splice(loc.index, 1);
 
             closeEventModal();
             renderCalendar();
@@ -2169,27 +2089,13 @@
         }
 
         function copyEvent() {
-            // Search all days for the event
-            let event = null;
-            for (const day of days) {
-                if (state.events[day]) {
-                    event = state.events[day].find(e => String(e.id) === String(state.editingEventId));
-                    if (event) break;
-                }
-            }
+            const event = findEvent(state.editingEventId);
             if (event) {
-                state.copiedEvent = {
-                    title: event.title,
-                    location: event.location,
-                    start: event.start,
-                    end: event.end,
-                    color: event.color,
-                    startDate: event.startDate || '',
-                    endDate: event.endDate || ''
-                };
+                const { id, ...rest } = event;
+                state.copiedEvent = { ...rest, startDate: event.startDate || '', endDate: event.endDate || '' };
                 closeEventModal();
                 // Show brief feedback
-                const btn = document.getElementById('addBtn');
+                const btn = $('addBtn');
                 btn.style.background = '#27ae60';
                 setTimeout(() => btn.style.background = '', 500);
             }
@@ -2198,20 +2104,20 @@
         function pasteEvent() {
             if (!state.copiedEvent) return;
 
-            document.getElementById('eventTitle').value = state.copiedEvent.title;
-            document.getElementById('eventLocation').value = state.copiedEvent.location || '';
-            document.getElementById('eventStart').value = state.copiedEvent.start;
-            document.getElementById('eventEnd').value = state.copiedEvent.end;
-            document.getElementById('eventStartDate').value = state.copiedEvent.startDate || '';
-            document.getElementById('eventEndDate').value = state.copiedEvent.endDate || '';
+            $('eventTitle').value = state.copiedEvent.title;
+            $('eventLocation').value = state.copiedEvent.location || '';
+            $('eventStart').value = state.copiedEvent.start;
+            $('eventEnd').value = state.copiedEvent.end;
+            $('eventStartDate').value = state.copiedEvent.startDate || '';
+            $('eventEndDate').value = state.copiedEvent.endDate || '';
             selectColor(state.copiedEvent.color);
         }
 
         function openSettingsModal() {
-            document.getElementById('scheduleTitle').value = state.title || '';
-            document.getElementById('startHour').value = state.startHour;
-            document.getElementById('endHour').value = state.endHour;
-            document.getElementById('showWeekends').checked = state.showWeekends;
+            $('scheduleTitle').value = state.title || '';
+            $('startHour').value = state.startHour;
+            $('endHour').value = state.endHour;
+            $('showWeekends').checked = state.showWeekends;
             settingsModal.classList.add('active');
         }
 
@@ -2220,11 +2126,11 @@
         }
 
         function applySettings() {
-            const newTitle = document.getElementById('scheduleTitle').value.trim();
+            const newTitle = $('scheduleTitle').value.trim();
             state.title = newTitle || 'Schedule Maker';
-            state.startHour = parseInt(document.getElementById('startHour').value);
-            state.endHour = parseInt(document.getElementById('endHour').value);
-            state.showWeekends = document.getElementById('showWeekends').checked;
+            state.startHour = parseInt($('startHour').value);
+            state.endHour = parseInt($('endHour').value);
+            state.showWeekends = $('showWeekends').checked;
             updateTitle();
             closeSettingsModal();
             renderCalendar();
@@ -2271,12 +2177,12 @@
             const baseUrl = window.location.origin + window.location.pathname;
             const vp = currentViewParams();
             if (state.editKey) {
-                document.getElementById('shareUrlEdit').value = baseUrl + '?room=' + roomId + '&key=' + state.editKey + vp;
+                $('shareUrlEdit').value = baseUrl + '?room=' + roomId + '&key=' + state.editKey + vp;
             } else {
-                document.getElementById('shareUrlEdit').value = 'No edit access';
+                $('shareUrlEdit').value = 'No edit access';
             }
-            document.getElementById('shareUrlView').value = baseUrl + '?room=' + roomId + vp;
-            document.getElementById('copyStatus').style.display = 'none';
+            $('shareUrlView').value = baseUrl + '?room=' + roomId + vp;
+            $('copyStatus').style.display = 'none';
         }
 
         function closeShareModal() {
@@ -2284,12 +2190,12 @@
         }
 
         function copyShareUrl(mode) {
-            const urlInput = document.getElementById(mode === 'view' ? 'shareUrlView' : 'shareUrlEdit');
+            const urlInput = $(mode === 'view' ? 'shareUrlView' : 'shareUrlEdit');
             urlInput.select();
             navigator.clipboard.writeText(urlInput.value).then(() => {
-                document.getElementById('copyStatus').style.display = 'block';
+                $('copyStatus').style.display = 'block';
                 setTimeout(() => {
-                    document.getElementById('copyStatus').style.display = 'none';
+                    $('copyStatus').style.display = 'none';
                 }, 2000);
             });
         }
@@ -2305,12 +2211,12 @@
         }
 
         function updateSyncUI() {
-            const statusEl = document.getElementById('syncStatus');
-            const statusText = document.getElementById('syncStatusText');
-            const roomInfo = document.getElementById('syncRoomInfo');
-            const roomCodeInput = document.getElementById('syncRoomCode');
-            const disconnectBtn = document.getElementById('disconnectSync');
-            const joinInput = document.getElementById('syncRoomId');
+            const statusEl = $('syncStatus');
+            const statusText = $('syncStatusText');
+            const roomInfo = $('syncRoomInfo');
+            const roomCodeInput = $('syncRoomCode');
+            const disconnectBtn = $('disconnectSync');
+            const joinInput = $('syncRoomId');
 
             if (state.syncRoomId) {
                 statusEl.style.background = '#e8f5e9';
@@ -2343,7 +2249,7 @@
         }
 
         function joinSyncRoom() {
-            const roomId = document.getElementById('syncRoomId').value.trim().toUpperCase();
+            const roomId = $('syncRoomId').value.trim().toUpperCase();
             if (!roomId) {
                 alert('Please enter a room code');
                 return;
@@ -2439,20 +2345,10 @@
                         claimedKeylessRoom = true;
                     }
 
-                    // Replace local state with this room's data, clearing any stale
-                    // events left over from a different room.
-                    days.forEach(d => state.events[d] = (data.events && data.events[d]) || []);
-                    if (data.startHour) state.startHour = data.startHour;
-                    if (data.endHour) state.endHour = data.endHour;
-                    if (typeof data.showWeekends === 'boolean') state.showWeekends = data.showWeekends;
-                    if (data.title) state.title = data.title;
-                    localStorage.setItem(currentStorageKey(), JSON.stringify({
-                        events: state.events,
-                        startHour: state.startHour,
-                        endHour: state.endHour,
-                        showWeekends: state.showWeekends,
-                        title: state.title
-                    }));
+                    // Replace local state with this room's data (clears stale events
+                    // from a different room), then cache it.
+                    applyScheduleData(data);
+                    persistLocal();
                     // Persist the freshly-generated key so the room is repaired now,
                     // not only after the next edit.
                     if (claimedKeylessRoom) syncToFirebase();
@@ -2474,27 +2370,8 @@
             syncListener = database.ref('rooms/' + roomId).on('value', (snapshot) => {
                 const data = snapshot.val();
                 if (data) {
-                    // Update local state from Firebase. Always reset every day from
-                    // the remote payload (Firebase drops empty arrays) so events
-                    // deleted remotely don't linger locally.
-                    days.forEach(day => {
-                        state.events[day] = (data.events && data.events[day]) || [];
-                    });
-                    if (data.startHour) state.startHour = data.startHour;
-                    if (data.endHour) state.endHour = data.endHour;
-                    if (typeof data.showWeekends === 'boolean') state.showWeekends = data.showWeekends;
-                    if (data.title) state.title = data.title;
-
-                    // Save to localStorage
-                    localStorage.setItem(currentStorageKey(), JSON.stringify({
-                        events: state.events,
-                        startHour: state.startHour,
-                        endHour: state.endHour,
-                        showWeekends: state.showWeekends,
-                        title: state.title
-                    }));
-
-                    // Re-render calendar and update title
+                    applyScheduleData(data);
+                    persistLocal();
                     renderCalendar();
                     updateTitle();
                 }
@@ -2514,7 +2391,7 @@
         }
 
         function copySyncCode() {
-            const codeInput = document.getElementById('syncRoomCode');
+            const codeInput = $('syncRoomCode');
             codeInput.select();
             navigator.clipboard.writeText(codeInput.value).then(() => {
                 const btn = event.target;
@@ -2548,12 +2425,20 @@
         let dropIndicator = null;
         let suppressNextClick = false;
 
-        function findEvent(eventId) {
+        // Locate an event by id across all days. Returns {day, index} or null.
+        // (ids compared as strings since Firebase may change their type.)
+        function findEventLocation(eventId) {
             for (const day of days) {
-                const ev = (state.events[day] || []).find(e => String(e.id) === String(eventId));
-                if (ev) return ev;
+                const arr = state.events[day] || [];
+                const index = arr.findIndex(e => String(e.id) === String(eventId));
+                if (index !== -1) return { day, index };
             }
             return null;
+        }
+
+        function findEvent(eventId) {
+            const loc = findEventLocation(eventId);
+            return loc ? state.events[loc.day][loc.index] : null;
         }
 
         function minutesToTime(totalMinutes) {
