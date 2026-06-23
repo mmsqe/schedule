@@ -9,6 +9,9 @@
     <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * {
             margin: 0;
@@ -17,10 +20,7 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: #f5f5f5;
             min-height: 100vh;
-            color: #333;
         }
 
         .app-container {
@@ -37,7 +37,6 @@
         }
 
         .header {
-            background: #fff;
             padding: 15px 25px;
             border-bottom: 1px solid #e0e0e0;
             display: flex;
@@ -47,7 +46,6 @@
 
         .header h1 {
             font-size: 1.5rem;
-            color: #2c3e50;
             font-weight: 600;
             cursor: pointer;
         }
@@ -64,38 +62,22 @@
         .day-btn {
             padding: 8px 16px;
             border: 1px solid #e0e0e0;
-            background: #fff;
-            color: #666;
             border-radius: 6px;
             cursor: pointer;
             font-weight: 500;
             transition: all 0.2s;
         }
 
-        .day-btn:hover {
-            border-color: #3498db;
-            color: #3498db;
-        }
-
-        .day-btn.active {
-            background: #3498db;
-            color: #fff;
-            border-color: #3498db;
-        }
-
         .calendar-wrapper {
             flex: 1;
             overflow-y: auto;
             padding: 20px;
-            background: #f5f5f5;
         }
 
         /* Calendar Grid */
         .calendar-grid {
             display: flex;
-            background: #fff;
             border-radius: 12px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
             overflow: hidden;
             min-height: 1020px;
         }
@@ -103,13 +85,11 @@
         .time-column {
             width: 60px;
             flex-shrink: 0;
-            background: #fafafa;
             border-right: 1px solid #e8e8e8;
         }
 
         .time-header {
             padding: 12px;
-            background: #fafafa;
             border-bottom: 1px solid #e8e8e8;
         }
 
@@ -120,7 +100,6 @@
             justify-content: center;
             padding-top: 0;
             font-size: 0.75rem;
-            color: #888;
             font-weight: 500;
             position: relative;
             top: -8px;
@@ -145,17 +124,10 @@
             padding: 12px;
             text-align: center;
             font-weight: 600;
-            color: #2c3e50;
-            background: #fafafa;
             border-bottom: 1px solid #e8e8e8;
             position: sticky;
             top: 0;
             z-index: 5;
-        }
-
-        .day-header.today {
-            color: #3498db;
-            background: #e8f4fc;
         }
 
         .day-events {
@@ -168,10 +140,6 @@
             border-bottom: 1px solid #f0f0f0;
             cursor: pointer;
             transition: background 0.15s;
-        }
-
-        .hour-slot:hover {
-            background: rgba(52, 152, 219, 0.08);
         }
 
         /* Event Blocks */
@@ -248,7 +216,6 @@
         /* Right Sidebar */
         .sidebar {
             width: 70px;
-            background: #fff;
             border-left: 1px solid #e0e0e0;
             display: flex;
             flex-direction: column;
@@ -262,8 +229,6 @@
             height: 50px;
             border-radius: 10px;
             border: none;
-            background: #f5f5f5;
-            color: #666;
             cursor: pointer;
             display: flex;
             flex-direction: column;
@@ -274,29 +239,14 @@
             font-size: 0.65rem;
         }
 
-        .sidebar-btn:hover {
-            background: #e8f4fc;
-            color: #3498db;
-        }
-
         .sidebar-btn svg {
             width: 20px;
             height: 20px;
         }
 
-        .sidebar-btn.primary {
-            background: #3498db;
-            color: #fff;
-        }
-
-        .sidebar-btn.primary:hover {
-            background: #2980b9;
-        }
-
         .sidebar-divider {
             width: 40px;
             height: 1px;
-            background: #e0e0e0;
             margin: 5px 0;
         }
 
@@ -323,7 +273,6 @@
         }
 
         .modal {
-            background: #fff;
             border-radius: 16px;
             width: 90%;
             max-width: 450px;
@@ -346,14 +295,12 @@
 
         .modal-header h2 {
             font-size: 1.25rem;
-            color: #2c3e50;
         }
 
         .modal-close {
             background: none;
             border: none;
             font-size: 1.5rem;
-            color: #999;
             cursor: pointer;
             padding: 5px;
             line-height: 1;
@@ -375,7 +322,6 @@
             display: block;
             margin-bottom: 8px;
             font-weight: 500;
-            color: #555;
             font-size: 0.9rem;
         }
 
@@ -386,15 +332,12 @@
             border: 1px solid #ddd;
             border-radius: 8px;
             font-size: 1rem;
-            color: #333;
             transition: border-color 0.2s, box-shadow 0.2s;
         }
 
         .form-group input:focus,
         .form-group select:focus {
             outline: none;
-            border-color: #3498db;
-            box-shadow: 0 0 0 3px rgba(52,152,219,0.15);
         }
 
         .time-inputs {
@@ -444,24 +387,6 @@
             border: none;
         }
 
-        .btn-primary {
-            background: #3498db;
-            color: #fff;
-        }
-
-        .btn-primary:hover {
-            background: #2980b9;
-        }
-
-        .btn-secondary {
-            background: #f5f5f5;
-            color: #666;
-        }
-
-        .btn-secondary:hover {
-            background: #e8e8e8;
-        }
-
         .btn-danger {
             background: #fff;
             color: #e74c3c;
@@ -480,7 +405,6 @@
 
         .settings-group h3 {
             font-size: 0.85rem;
-            color: #888;
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 12px;
@@ -494,7 +418,6 @@
         }
 
         .settings-row label {
-            color: #333;
             font-weight: 500;
         }
 
@@ -508,28 +431,6 @@
         .export-row .btn {
             flex: 1;
             min-width: 100px;
-        }
-
-        /* Empty State */
-        .empty-hint {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-            color: #bbb;
-            pointer-events: none;
-        }
-
-        .empty-hint svg {
-            width: 50px;
-            height: 50px;
-            margin-bottom: 10px;
-            opacity: 0.5;
-        }
-
-        .empty-hint p {
-            font-size: 0.9rem;
         }
 
         /* Sync Toast */
@@ -570,7 +471,6 @@
         /* View Mode Toggle */
         .view-toggle {
             display: flex;
-            background: #f0f0f0;
             border-radius: 8px;
             padding: 3px;
         }
@@ -579,7 +479,6 @@
             padding: 8px 16px;
             border: none;
             background: transparent;
-            color: #666;
             cursor: pointer;
             border-radius: 6px;
             font-weight: 500;
@@ -587,8 +486,6 @@
         }
 
         .view-toggle button.active {
-            background: #fff;
-            color: #333;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
 
@@ -597,13 +494,11 @@
             flex: 1;
             display: flex;
             flex-direction: column;
-            background: #fff;
         }
 
         .month-weekdays {
             display: grid;
             grid-template-columns: repeat(7, 1fr);
-            background: #fafafa;
             border-bottom: 1px solid #e8e8e8;
         }
 
@@ -611,7 +506,6 @@
             padding: 12px;
             text-align: center;
             font-weight: 600;
-            color: #2c3e50;
             font-size: 0.85rem;
         }
 
@@ -631,14 +525,6 @@
             transition: background 0.15s;
         }
 
-        .month-cell:hover {
-            background: rgba(52, 152, 219, 0.06);
-        }
-
-        .month-cell.other-month {
-            background: #fafafa;
-        }
-
         .month-cell.other-month .month-date {
             color: #ccc;
         }
@@ -646,7 +532,6 @@
         .month-date {
             font-size: 0.8rem;
             font-weight: 600;
-            color: #555;
             margin-bottom: 4px;
             width: 24px;
             height: 24px;
@@ -656,8 +541,6 @@
         }
 
         .month-cell.today .month-date {
-            background: #3498db;
-            color: #fff;
             border-radius: 50%;
         }
 
@@ -675,7 +558,6 @@
 
         .month-more {
             font-size: 0.65rem;
-            color: #888;
             padding: 0 4px;
         }
 
@@ -904,6 +786,80 @@
                 font-size: 0.8rem;
             }
         }
+        :root,
+        body[data-theme="light"] {
+            --mv-page:#efe7da; --mv-surface:#fffaf2; --mv-surface2:#fbf3e8; --mv-card:#fffaf3;
+            --mv-border:#ecdcc9; --mv-grid:#f1e7d8; --mv-text:#4a3b5c; --mv-text2:#6f6079; --mv-muted:#a294a3;
+            --mv-accent:#e07a5f; --mv-accent-on:#fffaf3; --mv-accent-tint:rgba(224,122,95,.10);
+            --mv-btn:#f5ebdf; --mv-input:#fbf4ea; --mv-shadow:0 14px 34px -14px rgba(150,110,95,.35);
+            --mv-today-bg:rgba(224,122,95,.12);
+        }
+        body[data-theme="dark"] {
+            --mv-page:#1a191f; --mv-surface:#23222a; --mv-surface2:#1f1e25; --mv-card:#23222a;
+            --mv-border:#36343f; --mv-grid:#2c2a33; --mv-text:#ece9f1; --mv-text2:#bcb7c4; --mv-muted:#867f8d;
+            --mv-accent:#ec9277; --mv-accent-on:#241b18; --mv-accent-tint:rgba(236,146,119,.14);
+            --mv-btn:#2c2a33; --mv-input:#1f1e25; --mv-shadow:0 20px 44px -16px rgba(0,0,0,.6);
+            --mv-today-bg:rgba(236,146,119,.16);
+        }
+
+        body {
+            background:var(--mv-page); color:var(--mv-text);
+            font-family:'Quicksand','Segoe UI',system-ui,sans-serif;
+            transition:background .35s ease, color .35s ease;
+        }
+        .header { background:var(--mv-surface); border-bottom-color:var(--mv-border); }
+        .header h1 { color:var(--mv-text); }
+        #weekLabel, #monthLabel { color:var(--mv-text) !important; }
+
+        .view-toggle { background:var(--mv-btn); }
+        .view-toggle button { color:var(--mv-text2); }
+        .view-toggle button.active { background:var(--mv-card); color:var(--mv-text); }
+
+        .day-btn { background:var(--mv-card); border-color:var(--mv-border); color:var(--mv-text2); }
+        .day-btn:hover { border-color:var(--mv-accent); color:var(--mv-accent); }
+        .day-btn.active { background:var(--mv-accent); color:var(--mv-accent-on); border-color:var(--mv-accent); }
+
+        .calendar-wrapper { background:transparent; }
+        .calendar-grid { background:var(--mv-card); border:1px solid var(--mv-border); box-shadow:var(--mv-shadow); }
+        .time-column, .time-header { background:var(--mv-surface2); border-color:var(--mv-border); }
+        .time-label { color:var(--mv-muted); }
+        .day-column { border-color:var(--mv-border); }
+        .day-header { background:var(--mv-surface2); color:var(--mv-text); border-color:var(--mv-border); }
+        .day-header.today { background:var(--mv-today-bg); color:var(--mv-accent); }
+        .hour-slot { border-color:var(--mv-grid); }
+        .hour-slot:hover { background:var(--mv-accent-tint); }
+
+        .sidebar { background:var(--mv-surface); border-color:var(--mv-border); }
+        .sidebar-btn { background:var(--mv-card); color:var(--mv-text2); }
+        .sidebar-btn:hover { background:var(--mv-accent-tint); color:var(--mv-accent); }
+        .sidebar-btn.primary { background:var(--mv-accent); color:var(--mv-accent-on); }
+        .sidebar-btn.primary:hover { background:var(--mv-accent); filter:brightness(1.06); }
+        .sidebar-divider { background:var(--mv-border); }
+        #themeBtn #themeLabel { font-size:0.6rem; }
+
+        .modal { background:var(--mv-card); color:var(--mv-text); }
+        .modal-header { border-color:var(--mv-border); }
+        .modal-header h2 { color:var(--mv-text); }
+        .modal-close { color:var(--mv-muted); }
+        .form-group label { color:var(--mv-text2); }
+        .form-group input, .form-group select { background:var(--mv-input); border-color:var(--mv-border); color:var(--mv-text); }
+        .form-group input:focus, .form-group select:focus { border-color:var(--mv-accent); box-shadow:0 0 0 3px var(--mv-accent-tint); }
+        .settings-group h3 { color:var(--mv-muted); }
+        .settings-row label { color:var(--mv-text); }
+        .btn-primary { background:var(--mv-accent); color:var(--mv-accent-on); }
+        .btn-primary:hover { background:var(--mv-accent); filter:brightness(1.06); }
+        .btn-secondary { background:var(--mv-btn); color:var(--mv-text2); }
+        .btn-secondary:hover { background:var(--mv-btn); filter:brightness(.97); }
+
+        .month-grid { background:var(--mv-card); }
+        .month-weekdays { background:var(--mv-surface2); border-color:var(--mv-border); }
+        .month-weekday { color:var(--mv-text); }
+        .month-cell { border-color:var(--mv-grid); }
+        .month-cell:hover { background:var(--mv-accent-tint); }
+        .month-cell.other-month { background:var(--mv-surface2); }
+        .month-date { color:var(--mv-text2); }
+        .month-cell.today .month-date { background:var(--mv-accent); color:var(--mv-accent-on); }
+        .month-more { color:var(--mv-muted); }
     </style>
 </head>
 <body>
@@ -952,6 +908,11 @@
             </button>
 
             <div class="sidebar-divider"></div>
+
+            <button class="sidebar-btn" id="themeBtn" title="Theme (Auto / Day / Night)">
+                <span id="themeIcon" style="display:flex;align-items:center;justify-content:center;width:20px;height:20px;"></span>
+                <span id="themeLabel">Auto</span>
+            </button>
 
             <button class="sidebar-btn" id="settingsBtn" title="Settings">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1464,12 +1425,62 @@
             }
         }
 
+        // ---- Day / Night theme (auto by time, manual override) ----
+        const THEME_KEY = 'schedulemaker_theme'; // 'auto' | 'light' | 'dark'
+        let themeAutoTimer = null;
+        const THEME_ICONS = {
+            light: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path></svg>',
+            dark: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>'
+        };
+        function getThemeMode() { return localStorage.getItem(THEME_KEY) || 'auto'; }
+        function autoThemeByTime() {
+            const h = new Date().getHours();
+            return (h < 7 || h >= 19) ? 'dark' : 'light';
+        }
+        function updateThemeButton(mode, theme) {
+            const icon = $('themeIcon'), label = $('themeLabel');
+            if (icon) icon.innerHTML = THEME_ICONS[theme] || THEME_ICONS.light;
+            if (label) label.textContent = mode === 'auto' ? 'Auto' : (mode === 'dark' ? 'Night' : 'Day');
+        }
+        // In 'auto' mode, flip the theme if time-of-day now calls for a different one.
+        function refreshAutoTheme() {
+            if (getThemeMode() !== 'auto') return;
+            const t = autoThemeByTime();
+            if (t !== document.body.getAttribute('data-theme')) {
+                document.body.setAttribute('data-theme', t);
+                updateThemeButton('auto', t);
+                renderCalendar();
+            }
+        }
+
+        function applyTheme() {
+            const mode = getThemeMode();
+            const theme = mode === 'auto' ? autoThemeByTime() : mode;
+            document.body.setAttribute('data-theme', theme);
+            updateThemeButton(mode, theme);
+            // Keep 'Auto' fresh: timer (tab left open) + visibility/focus (instant catch-up).
+            if (!themeAutoTimer) {
+                themeAutoTimer = setInterval(refreshAutoTheme, 60 * 1000);
+                document.addEventListener('visibilitychange', () => {
+                    if (!document.hidden) refreshAutoTheme();
+                });
+                window.addEventListener('focus', refreshAutoTheme);
+            }
+        }
+        function cycleTheme() {
+            const order = ['auto', 'light', 'dark'];
+            const next = order[(order.indexOf(getThemeMode()) + 1) % order.length];
+            localStorage.setItem(THEME_KEY, next);
+            applyTheme();
+            renderCalendar();
+        }
+
         // Initialize
         init();
 
         function init() {
-            // Resolve which room we're in BEFORE loading the cache, so each room
-            // reads its own cache instead of a single shared one.
+            applyTheme();
+            // Resolve the room BEFORE loadState so we read this room's own cache.
             const params = new URLSearchParams(window.location.search);
             const urlRoom = params.get('room');
             const savedRoom = localStorage.getItem('schedulemaker_syncRoom');
@@ -1603,6 +1614,7 @@
                 }
                 resetSchedule();
             });
+            $('themeBtn').addEventListener('click', cycleTheme);
 
             // Modal buttons
             $('modalClose').addEventListener('click', closeEventModal);
@@ -1823,8 +1835,9 @@
             return events.map(event => {
                 const { top, height } = getEventPosition(event);
                 const sizeClass = height < 40 ? 'tiny' : height < 60 ? 'small' : '';
-                const bgColor = hexToRgba(event.color, 0.2);
-                const textColor = darkenColor(event.color, 0.3);
+                const _dark = isDarkTheme();
+                const bgColor = hexToRgba(event.color, _dark ? 0.26 : 0.2);
+                const textColor = _dark ? lightenColor(event.color, 0.6) : darkenColor(event.color, 0.3);
                 const dated = event.startDate || event.endDate;
 
                 return `
@@ -1873,9 +1886,9 @@
                 let eventsHtml = dayEvents.slice(0, maxShow).map(ev => `
                     <div class="month-event" data-id="${ev.id}" data-day="${dayKey}"
                          title="${formatTime(ev.start)} - ${formatTime(ev.end)} ${ev.title}"
-                         style="background: ${hexToRgba(ev.color, 0.18)};
+                         style="background: ${hexToRgba(ev.color, isDarkTheme() ? 0.24 : 0.18)};
                                 border-left-color: ${ev.color};
-                                color: ${darkenColor(ev.color, 0.3)};">
+                                color: ${isDarkTheme() ? lightenColor(ev.color, 0.6) : darkenColor(ev.color, 0.3)};">
                         ${formatTime(ev.start)} ${ev.title}
                     </div>
                 `).join('');
@@ -1962,8 +1975,20 @@
             return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
         }
 
-        // The date currently in focus for a given view, used to default a new
-        // event's date range to where the user is looking (not today).
+        // Lighten a hex toward white (for readable event text in dark mode)
+        function lightenColor(hex, amount) {
+            const ch = i => {
+                const v = parseInt(hex.slice(i, i + 2), 16);
+                return Math.round(v + (255 - v) * amount);
+            };
+            return `rgb(${ch(1)}, ${ch(3)}, ${ch(5)})`;
+        }
+
+        function isDarkTheme() {
+            return document.body.getAttribute('data-theme') === 'dark';
+        }
+
+        // The date in focus for the current view (defaults a new event's range).
         function selectedViewDate(dayKey = null) {
             if (state.view === 'monthly') {
                 const md = state.monthDate;
