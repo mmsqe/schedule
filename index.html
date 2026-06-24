@@ -1725,6 +1725,7 @@
         }
 
         function renderCalendar() {
+            syncUrl();
             if (state.view === 'monthly') {
                 renderMonthly();
                 attachMonthHandlers();
@@ -2285,18 +2286,34 @@
             shareModal.classList.add('active');
         }
 
-        function currentViewParams() {
-            let p = '&view=' + state.view;
+        // Write the current view + position onto a URLSearchParams (clearing any
+        // stale month/week/day first). Shared by the share links and the address
+        // bar so both describe exactly what's on screen.
+        function applyViewParams(p) {
+            p.set('view', state.view);
+            p.delete('month'); p.delete('week'); p.delete('day');
             if (state.view === 'monthly') {
                 const y = state.monthDate.getFullYear();
                 const m = (state.monthDate.getMonth() + 1).toString().padStart(2, '0');
-                p += '&month=' + y + '-' + m;
+                p.set('month', y + '-' + m);
             } else {
                 // weekly / daily: carry the displayed week (Monday) and, for daily, the day
-                p += '&week=' + toYMD(startOfWeek(state.weekDate));
-                if (state.view === 'daily') p += '&day=' + state.currentDay;
+                p.set('week', toYMD(startOfWeek(state.weekDate)));
+                if (state.view === 'daily') p.set('day', state.currentDay);
             }
             return p;
+        }
+
+        function currentViewParams() {
+            return '&' + applyViewParams(new URLSearchParams()).toString();
+        }
+
+        // Mirror the current view/week (and room/key) into the address bar without
+        // adding history entries, so a refresh restores the same position instead
+        // of snapping back to today.
+        function syncUrl() {
+            const p = applyViewParams(new URLSearchParams(window.location.search));
+            history.replaceState(null, '', window.location.pathname + '?' + p.toString());
         }
 
         function showShareUrls(roomId) {
