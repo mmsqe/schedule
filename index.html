@@ -851,6 +851,20 @@
         .btn-secondary { background:var(--mv-btn); color:var(--mv-text2); }
         .btn-secondary:hover { background:var(--mv-btn); filter:brightness(.97); }
 
+        .skip-chips { display:flex; flex-wrap:wrap; gap:6px; }
+        .skip-chip {
+            display:inline-flex; align-items:center; gap:6px;
+            padding:4px 8px; border-radius:6px; font-size:0.8rem;
+            background:var(--mv-btn); color:var(--mv-text2); border:1px solid var(--mv-border);
+        }
+        .skip-chip button {
+            border:none; background:none; cursor:pointer; padding:0; line-height:1;
+            color:var(--mv-muted); font-size:1rem;
+        }
+        .skip-chip button:hover { color:var(--mv-accent); }
+        .skip-empty { font-size:0.8rem; color:var(--mv-muted); }
+        #skipThisDate { padding:8px 14px; }
+
         .month-grid { background:var(--mv-card); }
         .month-weekdays { background:var(--mv-surface2); border-color:var(--mv-border); }
         .month-weekday { color:var(--mv-text); }
@@ -1006,6 +1020,11 @@
                             <input type="date" id="eventEndDate">
                         </div>
                     </div>
+                </div>
+                <div class="form-group" id="skipGroup" style="display:none;">
+                    <label>Skip specific dates <span style="font-weight:400; color:#999; font-size:0.8rem;">(hide just this occurrence — the event still repeats otherwise)</span></label>
+                    <div id="skipChips" class="skip-chips"></div>
+                    <button type="button" class="btn btn-secondary" id="skipThisDate" style="display:none; margin-top:8px; font-size:0.85rem;"></button>
                 </div>
                 <div class="form-group">
                     <label>Color</label>
@@ -1202,6 +1221,8 @@
             title: 'Schedule Maker',
             selectedColor: '#4A90A4',
             editingEventId: null,
+            editingEventDate: null,      // YMD of the occurrence being edited, if known
+            editingExcludeDates: [],     // working copy of the event's skipped dates
             copiedEvent: null,
             syncRoomId: null,
             editKey: null,
@@ -1264,7 +1285,17 @@
         // Apply a loaded/synced schedule object onto state. Always resets every day
         // (Firebase drops empty arrays) so removed events don't linger.
         function applyScheduleData(data) {
-            days.forEach(day => state.events[day] = (data.events && data.events[day]) || []);
+            days.forEach(day => {
+                const list = (data.events && data.events[day]) || [];
+                // Firebase may return an array field as an object ({0:..,1:..});
+                // normalise excludeDates back to a plain array so .includes works.
+                list.forEach(ev => {
+                    if (ev.excludeDates && !Array.isArray(ev.excludeDates)) {
+                        ev.excludeDates = Object.values(ev.excludeDates);
+                    }
+                });
+                state.events[day] = list;
+            });
             if (data.startHour) state.startHour = data.startHour;
             if (data.endHour) state.endHour = data.endHour;
             if (typeof data.showWeekends === 'boolean') state.showWeekends = data.showWeekends;
@@ -1395,7 +1426,8 @@
                                     end: e.e,
                                     color: e.c,
                                     startDate: e.sd || '',
-                                    endDate: e.ed || ''
+                                    endDate: e.ed || '',
+                                    ...(Array.isArray(e.xd) && e.xd.length ? { excludeDates: e.xd } : {})
                                 }));
                             }
                         });
@@ -1624,6 +1656,22 @@
             $('copyEvent').addEventListener('click', copyEvent);
             $('pasteEvent').addEventListener('click', pasteEvent);
 
+            // Stage the current occurrence's date into the skip list.
+            $('skipThisDate').addEventListener('click', () => {
+                const d = state.editingEventDate;
+                if (d && !state.editingExcludeDates.includes(d)) {
+                    state.editingExcludeDates.push(d);
+                    renderSkipUI(true);
+                }
+            });
+            // Remove a date from the skip list (delegated to the chip × buttons).
+            $('skipChips').addEventListener('click', (e) => {
+                const d = e.target.dataset.skip;
+                if (!d) return;
+                state.editingExcludeDates = state.editingExcludeDates.filter(x => x !== d);
+                renderSkipUI(true);
+            });
+
             // Close modals on overlay click
             eventModal.addEventListener('click', (e) => {
                 if (e.target === eventModal) closeEventModal();
@@ -1783,7 +1831,7 @@
                     // Compare as strings since Firebase might change types
                     const event = dayEvents.find(ev => String(ev.id) === String(eventId));
                     if (event) {
-                        openEventModal(event, day);
+                        openEventModal(event, day, null, parseYMD(block.dataset.date));
                     }
                 });
             });
@@ -1798,6 +1846,19 @@
             const m = (date.getMonth() + 1).toString().padStart(2, '0');
             const d = date.getDate().toString().padStart(2, '0');
             return `${y}-${m}-${d}`;
+        }
+
+        // Parse a 'YYYY-MM-DD' string into a local Date (null/empty -> null)
+        function parseYMD(ymd) {
+            if (!ymd) return null;
+            const [y, m, d] = ymd.split('-').map(Number);
+            return new Date(y, m - 1, d);
+        }
+
+        // Human-friendly label for a YMD string, e.g. "Mon, 29 Jun 2026"
+        function formatYMD(ymd) {
+            const d = parseYMD(ymd);
+            return d ? d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : ymd;
         }
 
         // Monday (00:00) of the week containing the given date
@@ -1818,10 +1879,12 @@
             return d;
         }
 
-        // Is an event active on a given date? No range = always active.
+        // Is an event active on a given date? No range = always active, except
+        // for any one-off dates listed in excludeDates.
         function eventActiveOnDate(event, date) {
-            if (!event.startDate && !event.endDate) return true;
             const ymd = toYMD(date);
+            if (event.excludeDates && event.excludeDates.includes(ymd)) return false;
+            if (!event.startDate && !event.endDate) return true;
             if (event.startDate && ymd < event.startDate) return false;
             if (event.endDate && ymd > event.endDate) return false;
             return true;
@@ -1844,6 +1907,7 @@
                     <div class="event-block ${sizeClass}"
                          data-id="${event.id}"
                          data-day="${day}"
+                         data-date="${date ? toYMD(date) : ''}"
                          title="${dated ? 'Active ' + (event.startDate || '…') + ' to ' + (event.endDate || '…') : ''}"
                          style="top: ${top}px; height: ${height}px;
                                 background: ${bgColor};
@@ -1923,8 +1987,9 @@
                     e.stopPropagation();
                     const id = el.dataset.id;
                     const day = el.dataset.day;
+                    const cell = el.closest('.month-cell');
                     const event = (state.events[day] || []).find(ev => String(ev.id) === String(id));
-                    if (event) openEventModal(event, day);
+                    if (event) openEventModal(event, day, null, parseYMD(cell && cell.dataset.date));
                 });
             });
 
@@ -2011,6 +2076,10 @@
             $('copyEvent').style.display = event ? 'inline-block' : 'none';
             $('pasteEvent').style.display = (!event && state.copiedEvent) ? 'inline-block' : 'none';
 
+            // Track which occurrence was clicked and this event's skipped dates.
+            state.editingEventDate = dateContext ? toYMD(dateContext) : null;
+            state.editingExcludeDates = event && event.excludeDates ? [...event.excludeDates] : [];
+
             if (event) {
                 $('eventTitle').value = event.title;
                 $('eventLocation').value = event.location || '';
@@ -2043,13 +2112,41 @@
                 selectColor('#4A90A4');
             }
 
+            renderSkipUI(!!event);
             eventModal.classList.add('active');
             $('eventTitle').focus();
+        }
+
+        // Render the "Skip specific dates" section of the event modal. Only shown
+        // when editing an existing event (you skip an occurrence of something that
+        // already repeats).
+        function renderSkipUI(isExisting) {
+            const group = $('skipGroup');
+            group.style.display = isExisting ? 'block' : 'none';
+            if (!isExisting) return;
+
+            const dates = state.editingExcludeDates;
+            $('skipChips').innerHTML = dates.length
+                ? dates.slice().sort().map(d =>
+                    `<span class="skip-chip">📅 ${formatYMD(d)}<button type="button" data-skip="${d}" title="Un-skip">&times;</button></span>`
+                  ).join('')
+                : '<span class="skip-empty">Not skipped on any date.</span>';
+
+            const btn = $('skipThisDate');
+            const cur = state.editingEventDate;
+            if (cur && !dates.includes(cur)) {
+                btn.style.display = 'inline-block';
+                btn.textContent = `Skip ${formatYMD(cur)}`;
+            } else {
+                btn.style.display = 'none';
+            }
         }
 
         function closeEventModal() {
             eventModal.classList.remove('active');
             state.editingEventId = null;
+            state.editingEventDate = null;
+            state.editingExcludeDates = [];
         }
 
         function selectColor(color) {
@@ -2072,6 +2169,10 @@
                 startDate: $('eventStartDate').value,
                 endDate: $('eventEndDate').value
             };
+            // Only attach excludeDates when there are some, so unaffected events
+            // stay clean (and Firebase doesn't carry empty arrays).
+            const skipped = (state.editingExcludeDates || []).slice().sort();
+            if (skipped.length) event.excludeDates = skipped;
             return { day, event };
         }
 
@@ -2116,7 +2217,7 @@
         function copyEvent() {
             const event = findEvent(state.editingEventId);
             if (event) {
-                const { id, ...rest } = event;
+                const { id, excludeDates, ...rest } = event;
                 state.copiedEvent = { ...rest, startDate: event.startDate || '', endDate: event.endDate || '' };
                 closeEventModal();
                 // Show brief feedback
@@ -2709,9 +2810,12 @@
                             content += `## ${dayNames[dayIndex]}\n\n`;
                             content += '| Time | Event | Location | Dates |\n|------|-------|----------|-------|\n';
                             dayEvents.forEach(e => {
-                                const range = (e.startDate || e.endDate)
+                                let range = (e.startDate || e.endDate)
                                     ? `${e.startDate || '…'} → ${e.endDate || '…'}`
                                     : 'Every week';
+                                if (e.excludeDates && e.excludeDates.length) {
+                                    range += ` (skips ${e.excludeDates.join(', ')})`;
+                                }
                                 content += `| ${formatTime(e.start)} - ${formatTime(e.end)} | ${e.title} | ${e.location || '-'} | ${range} |\n`;
                             });
                             content += '\n';
