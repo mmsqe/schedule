@@ -27,6 +27,7 @@
             editingEventId: null,
             editingEventDate: null,      // YMD of the occurrence being edited, if known
             editingExcludeDates: [],     // working copy of the event's skipped dates
+            modalFocusDate: null,        // YMD the open modal is anchored to (seeds its date pickers)
             copiedEvent: null,
             syncRoomId: null,
             editKey: null,
@@ -484,6 +485,22 @@
                     renderSkipUI(true);
                 }
             });
+            // An empty <input type="date"> makes the browser's calendar pop open on
+            // today. Seed it with the date the modal is anchored to the first time
+            // it's clicked, so the picker lands on the selected date instead.
+            ['eventStartDate', 'eventEndDate'].forEach(id => {
+                $(id).addEventListener('click', () => {
+                    const input = $(id);
+                    if (input.value || input.dataset.seeded || !state.modalFocusDate) return;
+                    input.dataset.seeded = '1';
+                    // Never suggest an end date before the start of the range.
+                    const start = $('eventStartDate').value;
+                    input.value = (id === 'eventEndDate' && start > state.modalFocusDate)
+                        ? start
+                        : state.modalFocusDate;
+                });
+            });
+
             // Remove a date from the skip list (delegated to the chip × buttons).
             $('skipChips').addEventListener('click', (e) => {
                 const d = e.target.dataset.skip;
@@ -901,6 +918,13 @@
             state.editingEventDate = dateContext ? toYMD(dateContext) : null;
             state.editingExcludeDates = event && event.excludeDates ? [...event.excludeDates] : [];
 
+            // The date this modal is anchored to: the clicked cell / column, or the
+            // current view's selected date. Empty date pickers open here, not on today.
+            const focusDate = dateContext || selectedViewDate(day);
+            state.modalFocusDate = focusDate ? toYMD(focusDate) : null;
+            delete $('eventStartDate').dataset.seeded;
+            delete $('eventEndDate').dataset.seeded;
+
             if (event) {
                 $('eventTitle').value = event.title;
                 $('eventLocation').value = event.location || '';
@@ -914,10 +938,8 @@
                 $('eventTitle').value = '';
                 $('eventLocation').value = '';
                 $('eventDay').value = day || state.currentDay;
-                // Default the date range start to the date in focus (clicked cell /
-                // column, or the current view's selected date), not today.
-                const defDate = dateContext || selectedViewDate(day);
-                $('eventStartDate').value = defDate ? toYMD(defDate) : '';
+                // Default the date range start to the date in focus, not today.
+                $('eventStartDate').value = state.modalFocusDate || '';
                 $('eventEndDate').value = '';
 
                 if (hour !== null) {
@@ -968,6 +990,7 @@
             state.editingEventId = null;
             state.editingEventDate = null;
             state.editingExcludeDates = [];
+            state.modalFocusDate = null;
         }
 
         function selectColor(color) {
