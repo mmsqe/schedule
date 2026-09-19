@@ -27,6 +27,7 @@
             editingEventId: null,
             editingEventDate: null,      // YMD of the occurrence being edited, if known
             editingExcludeDates: [],     // working copy of the event's skipped dates
+            editingPeriods: [],          // working copy of the event's time ranges
             modalFocusDate: null,        // YMD the open modal is anchored to (seeds its date pickers)
             copiedEvent: null,
             syncRoomId: null,
@@ -109,11 +110,12 @@
             days.forEach(day => {
                 const list = (data.events && data.events[day]) || [];
                 // Firebase may return an array field as an object ({0:..,1:..});
-                // normalise excludeDates back to a plain array so .includes works.
+                // normalise excludeDates/periods back to plain arrays.
                 list.forEach(ev => {
                     if (ev.excludeDates && !Array.isArray(ev.excludeDates)) {
                         ev.excludeDates = Object.values(ev.excludeDates);
                     }
+                    if (ev.periods) ev.periods = normalizePeriods(ev.periods);
                 });
                 state.events[day] = list;
             });
@@ -485,20 +487,47 @@
                     renderSkipUI(true);
                 }
             });
-            // An empty <input type="date"> makes the browser's calendar pop open on
-            // today. Seed it with the date the modal is anchored to the first time
-            // it's clicked, so the picker lands on the selected date instead.
-            ['eventStartDate', 'eventEndDate'].forEach(id => {
-                $(id).addEventListener('click', () => {
-                    const input = $(id);
-                    if (input.value || input.dataset.seeded || !state.modalFocusDate) return;
-                    input.dataset.seeded = '1';
-                    // Never suggest an end date before the start of the range.
-                    const start = $('eventStartDate').value;
-                    input.value = (id === 'eventEndDate' && start > state.modalFocusDate)
-                        ? start
-                        : state.modalFocusDate;
+            // Add a further time range, starting the day after the previous one
+            // ends (the usual "time changed from this date on" case).
+            $('addPeriod').addEventListener('click', () => {
+                const last = state.editingPeriods[state.editingPeriods.length - 1];
+                state.editingPeriods.push({
+                    start: last ? last.start : '09:00',
+                    end: last ? last.end : '10:00',
+                    startDate: last ? nextYMD(last.endDate) : '',
+                    endDate: ''
                 });
+                renderPeriodsUI();
+            });
+
+            // Time-range edits: keep the working copy in step with the inputs.
+            $('periodList').addEventListener('input', (e) => {
+                const { i, f } = e.target.dataset;
+                const period = state.editingPeriods[Number(i)];
+                if (!f || !period) return;
+                period[f] = e.target.value;
+                refreshPeriodHints();
+            });
+
+            $('periodList').addEventListener('click', (e) => {
+                const el = e.target;
+                if (el.dataset.remove !== undefined) {
+                    state.editingPeriods.splice(Number(el.dataset.remove), 1);
+                    renderPeriodsUI();
+                    return;
+                }
+                // An empty <input type="date"> makes the browser's calendar pop open
+                // on today. Seed it with the date the modal is anchored to the first
+                // time it's clicked, so the picker lands on the selected date instead.
+                const period = state.editingPeriods[Number(el.dataset.i)];
+                if (el.type !== 'date' || el.value || el.dataset.seeded || !period || !state.modalFocusDate) return;
+                el.dataset.seeded = '1';
+                // Never suggest an end date before the start of the same range.
+                el.value = (el.dataset.f === 'endDate' && period.startDate > state.modalFocusDate)
+                    ? period.startDate
+                    : state.modalFocusDate;
+                period[el.dataset.f] = el.value;
+                refreshPeriodHints();
             });
 
             // Remove a date from the skip list (delegated to the chip × buttons).
@@ -717,36 +746,114 @@
             return d;
         }
 
-        // Is an event active on a given date? No range = always active, except
-        // for any one-off dates listed in excludeDates.
-        function eventActiveOnDate(event, date) {
-            const ymd = toYMD(date);
-            if (event.excludeDates && event.excludeDates.includes(ymd)) return false;
-            if (!event.startDate && !event.endDate) return true;
-            if (event.startDate && ymd < event.startDate) return false;
-            if (event.endDate && ymd > event.endDate) return false;
+        // The day after a YMD string (used to chain one time range onto the next)
+        function nextYMD(ymd) {
+            const d = parseYMD(ymd);
+            if (!d) return '';
+            d.setDate(d.getDate() + 1);
+            return toYMD(d);
+        }
+
+        // --- Time ranges (periods) ---
+        // An event's times can change over time: 10:00-11:00 until 9 Oct, then
+        // 11:00-11:45 from 10 Oct. The first range lives in the event's own
+        // start/end/startDate/endDate (so old data and old clients still work);
+        // any further ranges are appended to `periods`.
+
+        // Coerce stored periods into a clean array (Firebase may hand back an
+        // array field as an object) and drop anything without times.
+        function normalizePeriods(raw) {
+            const list = Array.isArray(raw) ? raw : (raw && typeof raw === 'object' ? Object.values(raw) : []);
+            return list
+                .filter(p => p && p.start && p.end)
+                .map(p => ({
+                    start: p.start,
+                    end: p.end,
+                    startDate: p.startDate || '',
+                    endDate: p.endDate || ''
+                }));
+        }
+
+        // Every time range an event carries, base first. Always fresh objects,
+        // so callers (the modal) can edit them without touching stored state.
+        function eventPeriods(event) {
+            return [
+                {
+                    start: event.start,
+                    end: event.end,
+                    startDate: event.startDate || '',
+                    endDate: event.endDate || ''
+                },
+                ...normalizePeriods(event.periods)
+            ];
+        }
+
+        // Put ranges in chronological order (an open start counts as earliest),
+        // so "first match wins" below resolves overlaps predictably.
+        function sortPeriods(periods) {
+            return periods.slice().sort((a, b) =>
+                (a.startDate || '').localeCompare(b.startDate || '') || a.start.localeCompare(b.start));
+        }
+
+        function periodCoversDate(period, ymd) {
+            if (period.startDate && ymd < period.startDate) return false;
+            if (period.endDate && ymd > period.endDate) return false;
             return true;
         }
 
-        function renderDayEvents(day, date = null) {
-            let events = state.events[day] || [];
-            if (date) events = events.filter(ev => eventActiveOnDate(ev, date));
-            if (events.length === 0) return '';
+        // The event as it occurs on a date: its fields overlaid with the time
+        // range in effect that day. null when the date is skipped or no range
+        // covers it.
+        function occurrenceOn(event, date) {
+            const ymd = toYMD(date);
+            if (event.excludeDates && event.excludeDates.includes(ymd)) return null;
+            const periods = eventPeriods(event);
+            const index = periods.findIndex(p => periodCoversDate(p, ymd));
+            if (index === -1) return null;
+            return { ...event, ...periods[index], periodIndex: index, periodCount: periods.length };
+        }
 
-            return events.map(event => {
+        // Write times back into one of an event's ranges (index 0 = base fields)
+        function setPeriodTimes(event, index, start, end) {
+            const extra = normalizePeriods(event.periods);
+            if (index <= 0 || !extra[index - 1]) {
+                event.start = start;
+                event.end = end;
+                return;
+            }
+            extra[index - 1] = { ...extra[index - 1], start, end };
+            event.periods = extra;
+        }
+
+        function renderDayEvents(day, date = null) {
+            // Resolve each event to the time range in effect on this date; with no
+            // date to go on, fall back to its first range.
+            const occurrences = (state.events[day] || [])
+                .map(ev => {
+                    if (date) return occurrenceOn(ev, date);
+                    const periods = eventPeriods(ev);
+                    return { ...ev, ...periods[0], periodIndex: 0, periodCount: periods.length };
+                })
+                .filter(Boolean);
+            if (occurrences.length === 0) return '';
+
+            return occurrences.map(event => {
                 const { top, height } = getEventPosition(event);
                 const sizeClass = height < 40 ? 'tiny' : height < 60 ? 'small' : '';
                 const _dark = isDarkTheme();
                 const bgColor = hexToRgba(event.color, _dark ? 0.26 : 0.2);
                 const textColor = _dark ? lightenColor(event.color, 0.6) : darkenColor(event.color, 0.3);
-                const dated = event.startDate || event.endDate;
+                const dated = event.startDate || event.endDate || event.periodCount > 1;
+                const rangeLabel = 'Active ' + (event.startDate || '…') + ' to ' + (event.endDate || '…')
+                    + (event.periodCount > 1 ? ` · time range ${event.periodIndex + 1} of ${event.periodCount}` : '');
 
                 return `
                     <div class="event-block ${sizeClass}"
                          data-id="${event.id}"
                          data-day="${day}"
                          data-date="${date ? toYMD(date) : ''}"
-                         title="${dated ? 'Active ' + (event.startDate || '…') + ' to ' + (event.endDate || '…') : ''}"
+                         data-period="${event.periodIndex}"
+                         title="${dated ? rangeLabel : ''}"
                          style="top: ${top}px; height: ${height}px;
                                 background: ${bgColor};
                                 border-left-color: ${event.color};
@@ -782,7 +889,8 @@
                 const isToday = cellDate.toDateString() === today.toDateString();
 
                 const dayEvents = (state.events[dayKey] || [])
-                    .filter(ev => eventActiveOnDate(ev, cellDate))
+                    .map(ev => occurrenceOn(ev, cellDate))
+                    .filter(Boolean)
                     .sort((a, b) => a.start.localeCompare(b.start));
 
                 let eventsHtml = dayEvents.slice(0, maxShow).map(ev => `
@@ -922,42 +1030,76 @@
             // current view's selected date. Empty date pickers open here, not on today.
             const focusDate = dateContext || selectedViewDate(day);
             state.modalFocusDate = focusDate ? toYMD(focusDate) : null;
-            delete $('eventStartDate').dataset.seeded;
-            delete $('eventEndDate').dataset.seeded;
 
             if (event) {
                 $('eventTitle').value = event.title;
                 $('eventLocation').value = event.location || '';
                 $('eventDay').value = day;
-                $('eventStart').value = event.start;
-                $('eventEnd').value = event.end;
-                $('eventStartDate').value = event.startDate || '';
-                $('eventEndDate').value = event.endDate || '';
+                state.editingPeriods = eventPeriods(event);
                 selectColor(event.color);
             } else {
                 $('eventTitle').value = '';
                 $('eventLocation').value = '';
                 $('eventDay').value = day || state.currentDay;
-                // Default the date range start to the date in focus, not today.
-                $('eventStartDate').value = state.modalFocusDate || '';
-                $('eventEndDate').value = '';
 
+                let start = '09:00', end = '10:00';
                 if (hour !== null) {
-                    const startTime = `${hour.toString().padStart(2, '0')}:00`;
-                    const endHour = Math.min(hour + 1, state.endHour);
-                    const endTime = `${endHour.toString().padStart(2, '0')}:00`;
-                    $('eventStart').value = startTime;
-                    $('eventEnd').value = endTime;
-                } else {
-                    $('eventStart').value = '09:00';
-                    $('eventEnd').value = '10:00';
+                    start = `${hour.toString().padStart(2, '0')}:00`;
+                    end = `${Math.min(hour + 1, state.endHour).toString().padStart(2, '0')}:00`;
                 }
+                // Default the date range start to the date in focus, not today.
+                state.editingPeriods = [{ start, end, startDate: state.modalFocusDate || '', endDate: '' }];
                 selectColor('#4A90A4');
             }
 
+            renderPeriodsUI();
             renderSkipUI(!!event);
             eventModal.classList.add('active');
             $('eventTitle').focus();
+        }
+
+        // Render the editable list of time ranges. Rebuilt only on add/remove —
+        // typed edits write straight into state.editingPeriods so the field you
+        // are in never loses focus mid-edit.
+        function renderPeriodsUI() {
+            const many = state.editingPeriods.length > 1;
+            $('periodList').innerHTML = state.editingPeriods.map((p, i) => `
+                <div class="period-row" data-i="${i}">
+                    ${many ? `
+                    <div class="period-head">
+                        <span class="period-label">Time range ${i + 1}</span>
+                        <span class="period-current" data-i="${i}" style="display:none;">on this date</span>
+                        <button type="button" class="period-remove" data-remove="${i}" title="Remove this time range">&times;</button>
+                    </div>` : ''}
+                    <div class="time-inputs">
+                        <input type="time" data-i="${i}" data-f="start" value="${p.start}">
+                        <input type="time" data-i="${i}" data-f="end" value="${p.end}">
+                    </div>
+                    <div class="time-inputs period-dates">
+                        <div>
+                            <label>From</label>
+                            <input type="date" data-i="${i}" data-f="startDate" value="${p.startDate || ''}">
+                        </div>
+                        <div>
+                            <label>Until</label>
+                            <input type="date" data-i="${i}" data-f="endDate" value="${p.endDate || ''}">
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            refreshPeriodHints();
+        }
+
+        // Flag the range that applies to the occurrence the modal was opened
+        // from, so it's obvious which row governs the block you clicked.
+        function refreshPeriodHints() {
+            const cur = state.editingEventDate;
+            const active = (cur && state.editingPeriods.length > 1)
+                ? state.editingPeriods.findIndex(p => periodCoversDate(p, cur))
+                : -1;
+            document.querySelectorAll('#periodList .period-current').forEach(el => {
+                el.style.display = Number(el.dataset.i) === active ? 'inline' : 'none';
+            });
         }
 
         // Render the "Skip specific dates" section of the event modal. Only shown
@@ -990,6 +1132,7 @@
             state.editingEventId = null;
             state.editingEventDate = null;
             state.editingExcludeDates = [];
+            state.editingPeriods = [];
             state.modalFocusDate = null;
         }
 
@@ -1001,18 +1144,21 @@
         }
 
         // Read the event modal fields. `day` is the target day; the rest form the
-        // stored event object.
+        // stored event object. The earliest time range becomes the event's own
+        // start/end/date fields; any others are stored alongside in `periods`.
         function readEventForm() {
+            const [base, ...extra] = sortPeriods(state.editingPeriods);
             const { day, ...event } = {
                 day: $('eventDay').value,
                 title: $('eventTitle').value.trim(),
                 location: $('eventLocation').value.trim(),
-                start: $('eventStart').value,
-                end: $('eventEnd').value,
+                start: base.start,
+                end: base.end,
                 color: state.selectedColor,
-                startDate: $('eventStartDate').value,
-                endDate: $('eventEndDate').value
+                startDate: base.startDate || '',
+                endDate: base.endDate || ''
             };
+            if (extra.length) event.periods = extra;
             // Only attach excludeDates when there are some, so unaffected events
             // stay clean (and Firebase doesn't carry empty arrays).
             const skipped = (state.editingExcludeDates || []).slice().sort();
@@ -1021,13 +1167,21 @@
         }
 
         function saveEvent() {
+            if (!state.editingPeriods.length) return;
             const { day, event } = readEventForm();
 
             if (!event.title) { alert('Please enter an event title'); return; }
-            if (event.start >= event.end) { alert('End time must be after start time'); return; }
-            if (event.startDate && event.endDate && event.startDate > event.endDate) {
-                alert('End date must be on or after start date');
-                return;
+
+            const ranges = eventPeriods(event);
+            for (let i = 0; i < ranges.length; i++) {
+                const r = ranges[i];
+                const where = ranges.length > 1 ? `Time range ${i + 1}: ` : '';
+                if (!r.start || !r.end) { alert(where + 'please set a start and end time'); return; }
+                if (r.start >= r.end) { alert(where + 'end time must be after start time'); return; }
+                if (r.startDate && r.endDate && r.startDate > r.endDate) {
+                    alert(where + 'end date must be on or after start date');
+                    return;
+                }
             }
 
             if (!state.events[day]) state.events[day] = [];
@@ -1061,8 +1215,9 @@
         function copyEvent() {
             const event = findEvent(state.editingEventId);
             if (event) {
-                const { id, excludeDates, ...rest } = event;
-                state.copiedEvent = { ...rest, startDate: event.startDate || '', endDate: event.endDate || '' };
+                const { id, excludeDates, periods, ...rest } = event;
+                const [base, ...extra] = eventPeriods(event);
+                state.copiedEvent = { ...rest, ...base, ...(extra.length ? { periods: extra } : {}) };
                 closeEventModal();
                 // Show brief feedback
                 const btn = $('addBtn');
@@ -1076,10 +1231,8 @@
 
             $('eventTitle').value = state.copiedEvent.title;
             $('eventLocation').value = state.copiedEvent.location || '';
-            $('eventStart').value = state.copiedEvent.start;
-            $('eventEnd').value = state.copiedEvent.end;
-            $('eventStartDate').value = state.copiedEvent.startDate || '';
-            $('eventEndDate').value = state.copiedEvent.endDate || '';
+            state.editingPeriods = eventPeriods(state.copiedEvent);
+            renderPeriodsUI();
             selectColor(state.copiedEvent.color);
         }
 
@@ -1481,9 +1634,14 @@
             const event = findEvent(eventId);
             if (!event) return;
 
+            // Drag the time range that produced this block, not necessarily the
+            // event's first one.
+            const periodIndex = Number(block.dataset.period) || 0;
+            const period = eventPeriods(event)[periodIndex] || eventPeriods(event)[0];
+
             const rect = block.getBoundingClientRect();
             const offsetY = clientY - rect.top;
-            const durationMinutes = timeToMinutes(event.end) - timeToMinutes(event.start);
+            const durationMinutes = timeToMinutes(period.end) - timeToMinutes(period.start);
 
             const ghost = block.cloneNode(true);
             Object.assign(ghost.style, {
@@ -1505,7 +1663,7 @@
             block.classList.add('dragging');
 
             dragState = {
-                eventId, originalDay: day, event, ghost,
+                eventId, originalDay: day, event, ghost, periodIndex,
                 originalBlock: block, offsetY, durationMinutes,
                 startX: clientX, startY: clientY, moved: false,
             };
@@ -1535,7 +1693,7 @@
 
         function endDrag(clientX, clientY) {
             if (!dragState) return;
-            const { ghost, originalBlock, eventId, originalDay, durationMinutes, moved } = dragState;
+            const { ghost, originalBlock, eventId, originalDay, durationMinutes, periodIndex, moved } = dragState;
 
             ghost.remove();
             originalBlock.classList.remove('dragging');
@@ -1546,7 +1704,7 @@
                 setTimeout(() => suppressNextClick = false, 150);
                 const target = getDragTarget(clientX, clientY - dragState.offsetY);
                 if (target) {
-                    moveEventByDrag(eventId, originalDay, target.day, target.absoluteMinutes, durationMinutes);
+                    moveEventByDrag(eventId, originalDay, target.day, target.absoluteMinutes, durationMinutes, periodIndex);
                 }
             }
 
@@ -1599,7 +1757,7 @@
             }
         }
 
-        function moveEventByDrag(eventId, fromDay, toDay, newStartMinutes, durationMinutes) {
+        function moveEventByDrag(eventId, fromDay, toDay, newStartMinutes, durationMinutes, periodIndex = 0) {
             if (!toDay) return;
             const fromEvents = state.events[fromDay];
             if (!fromEvents) return;
@@ -1612,8 +1770,7 @@
             // Clamp within calendar bounds
             const maxStart = state.endHour * 60 - durationMinutes;
             const clampedStart = Math.max(state.startHour * 60, Math.min(newStartMinutes, maxStart));
-            event.start = minutesToTime(clampedStart);
-            event.end = minutesToTime(clampedStart + durationMinutes);
+            setPeriodTimes(event, periodIndex, minutesToTime(clampedStart), minutesToTime(clampedStart + durationMinutes));
 
             fromEvents.splice(idx, 1);
             if (!state.events[toDay]) state.events[toDay] = [];
@@ -1650,9 +1807,11 @@
             switch (format) {
                 case 'csv':
                     content = 'Day,Start,End,Title,Location,From Date,Until Date\n';
-                    content += allEvents.map(e =>
-                        `${e.day},${e.start},${e.end},"${e.title}","${e.location || ''}",${e.startDate || ''},${e.endDate || ''}`
-                    ).join('\n');
+                    // One row per time range, so a time that changes part-way
+                    // through the term exports as two dated rows.
+                    content += allEvents.flatMap(e => eventPeriods(e).map(p =>
+                        `${e.day},${p.start},${p.end},"${e.title}","${e.location || ''}",${p.startDate || ''},${p.endDate || ''}`
+                    )).join('\n');
                     filename += '.csv';
                     mimeType = 'text/csv';
                     break;
@@ -1670,13 +1829,15 @@
                             content += `## ${dayNames[dayIndex]}\n\n`;
                             content += '| Time | Event | Location | Dates |\n|------|-------|----------|-------|\n';
                             dayEvents.forEach(e => {
-                                let range = (e.startDate || e.endDate)
-                                    ? `${e.startDate || '…'} → ${e.endDate || '…'}`
-                                    : 'Every week';
-                                if (e.excludeDates && e.excludeDates.length) {
-                                    range += ` (skips ${e.excludeDates.join(', ')})`;
-                                }
-                                content += `| ${formatTime(e.start)} - ${formatTime(e.end)} | ${e.title} | ${e.location || '-'} | ${range} |\n`;
+                                eventPeriods(e).forEach(p => {
+                                    let range = (p.startDate || p.endDate)
+                                        ? `${p.startDate || '…'} → ${p.endDate || '…'}`
+                                        : 'Every week';
+                                    if (e.excludeDates && e.excludeDates.length) {
+                                        range += ` (skips ${e.excludeDates.join(', ')})`;
+                                    }
+                                    content += `| ${formatTime(p.start)} - ${formatTime(p.end)} | ${e.title} | ${e.location || '-'} | ${range} |\n`;
+                                });
                             });
                             content += '\n';
                         }

@@ -836,6 +836,27 @@
         .btn-secondary { background:var(--mv-btn); color:var(--mv-text2); }
         .btn-secondary:hover { background:var(--mv-btn); filter:brightness(.97); }
 
+        .period-row { margin-bottom:10px; }
+        .period-row + .period-row {
+            border-top:1px dashed var(--mv-border); padding-top:12px;
+        }
+        .period-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+        .period-label { font-size:0.8rem; font-weight:600; color:var(--mv-text2); }
+        .period-current {
+            font-size:0.72rem; color:var(--mv-accent); background:var(--mv-accent-tint);
+            padding:2px 8px; border-radius:999px;
+        }
+        .period-remove {
+            margin-left:auto; border:none; background:none; cursor:pointer;
+            color:var(--mv-muted); font-size:1.1rem; line-height:1; padding:0 4px;
+        }
+        .period-remove:hover { color:var(--mv-accent); }
+        .period-dates { margin-top:8px; }
+        .period-dates label {
+            display:block; font-size:0.8rem; color:var(--mv-muted); margin-bottom:4px; font-weight:400;
+        }
+        #addPeriod { padding:8px 14px; font-size:0.85rem; }
+
         .skip-chips { display:flex; flex-wrap:wrap; gap:6px; }
         .skip-chip {
             display:inline-flex; align-items:center; gap:6px;
