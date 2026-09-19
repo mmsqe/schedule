@@ -505,7 +505,19 @@
                 const { i, f } = e.target.dataset;
                 const period = state.editingPeriods[Number(i)];
                 if (!f || !period) return;
+                const wasStart = period.start;
                 period[f] = e.target.value;
+                // Moving a start drags its end along, keeping the length of the
+                // range — so pushing a 10:00-11:00 range to start at 11:00 leaves
+                // an hour, not a zero-length range you then have to repair.
+                if (f === 'start' && wasStart && period.start && period.end) {
+                    const shifted = timeToMinutes(period.end) + timeToMinutes(period.start) - timeToMinutes(wasStart);
+                    if (shifted > timeToMinutes(period.start)) {
+                        period.end = minutesToTime(Math.min(shifted, 23 * 60 + 59));
+                        const endInput = document.querySelector(`#periodList [data-i="${i}"][data-f="end"]`);
+                        if (endInput) endInput.value = period.end;
+                    }
+                }
                 refreshPeriodHints();
             });
 
@@ -786,6 +798,33 @@
                 },
                 ...normalizePeriods(event.periods)
             ];
+        }
+
+        // Fill in blank times from the range above, so a later range can say
+        // "same times, new dates" — or move its start and leave the end to
+        // follow — by leaving a field empty. A blank end inherits the previous
+        // range's *length* rather than its end time, so pushing the start later
+        // can't collapse the range to nothing. Dates left blank stay blank:
+        // those mean open-ended. The first range has nothing to inherit from,
+        // so saving demands both its times.
+        function resolvePeriods(periods) {
+            const resolved = [];
+            periods.forEach((p, i) => {
+                const prev = resolved[i - 1];
+                const start = p.start || (prev ? prev.start : '');
+                let end = p.end;
+                if (!end && prev && start) {
+                    const span = Math.max(timeToMinutes(prev.end) - timeToMinutes(prev.start), 15);
+                    end = minutesToTime(Math.min(timeToMinutes(start) + span, 23 * 60 + 59));
+                }
+                resolved.push({
+                    start,
+                    end: end || '',
+                    startDate: p.startDate || '',
+                    endDate: p.endDate || ''
+                });
+            });
+            return resolved;
         }
 
         // Put ranges in chronological order (an open start counts as earliest),
@@ -1147,7 +1186,7 @@
         // stored event object. The earliest time range becomes the event's own
         // start/end/date fields; any others are stored alongside in `periods`.
         function readEventForm() {
-            const [base, ...extra] = sortPeriods(state.editingPeriods);
+            const [base, ...extra] = sortPeriods(resolvePeriods(state.editingPeriods));
             const { day, ...event } = {
                 day: $('eventDay').value,
                 title: $('eventTitle').value.trim(),
@@ -1172,7 +1211,10 @@
 
             if (!event.title) { alert('Please enter an event title'); return; }
 
-            const ranges = eventPeriods(event);
+            // Check the rows in the order they're shown, so the number in any
+            // complaint points at the row on screen — storage sorts them
+            // chronologically afterwards, which can reorder them.
+            const ranges = resolvePeriods(state.editingPeriods);
             for (let i = 0; i < ranges.length; i++) {
                 const r = ranges[i];
                 const where = ranges.length > 1 ? `Time range ${i + 1}: ` : '';
