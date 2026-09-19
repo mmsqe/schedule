@@ -151,11 +151,35 @@
                 .then(() => showToast('Saved & synced', 'success'))
                 .catch(err => {
                     console.error('Sync error:', err);
-                    const msg = (err && /permission/i.test(err.message || ''))
-                        ? "Couldn't sync: permission denied for this room."
-                        : "Couldn't sync to server. Changes saved locally only.";
-                    showToast(msg, 'error');
+                    if (err && /permission/i.test(err.message || '')) {
+                        handleSyncDenied(state.syncRoomId);
+                        return;
+                    }
+                    showToast("Couldn't sync to server. Changes saved locally only.", 'error');
                 });
+        }
+
+        // A denied write is the room's rules turning us away, so retrying won't
+        // help. Rooms stay readable, so ask which edit key this one holds: a key
+        // that no longer matches ours means we're really a viewer now. Anything
+        // else is the rules refusing the data itself — name that instead of
+        // leaving "permission denied" to be guessed at.
+        function handleSyncDenied(roomId) {
+            if (!roomId) return;
+            database.ref('rooms/' + roomId + '/editKey').once('value')
+                .then(snap => {
+                    const roomKey = snap.val();
+                    if (roomKey && roomKey !== state.editKey) {
+                        localStorage.removeItem('schedulemaker_editKey_' + roomId);
+                        state.editKey = null;
+                        state.viewOnly = true;
+                        updateViewOnlyUI();
+                        showToast('This room\'s edit key changed. Open the edit link again to make changes — your edits are still saved on this device.', 'error');
+                    } else {
+                        showToast("The room's rules rejected this change. Saved on this device only.", 'error');
+                    }
+                })
+                .catch(() => showToast("Couldn't sync: permission denied for this room.", 'error'));
         }
 
         // Lightweight, non-blocking toast for sync feedback
@@ -507,9 +531,8 @@
                 if (!f || !period) return;
                 const wasStart = period.start;
                 period[f] = e.target.value;
-                // Moving a start drags its end along, keeping the length of the
-                // range — so pushing a 10:00-11:00 range to start at 11:00 leaves
-                // an hour, not a zero-length range you then have to repair.
+                // A moved start drags its end along: pushing 10:00-11:00 to start
+                // at 11:00 leaves an hour, not a zero-length range to repair.
                 if (f === 'start' && wasStart && period.start && period.end) {
                     const shifted = timeToMinutes(period.end) + timeToMinutes(period.start) - timeToMinutes(wasStart);
                     if (shifted > timeToMinutes(period.start)) {
@@ -767,13 +790,12 @@
         }
 
         // --- Time ranges (periods) ---
-        // An event's times can change over time: 10:00-11:00 until 9 Oct, then
-        // 11:00-11:45 from 10 Oct. The first range lives in the event's own
-        // start/end/startDate/endDate (so old data and old clients still work);
-        // any further ranges are appended to `periods`.
+        // An event's times can change part-way through: 10:00-11:00 until 9 Oct,
+        // then 11:00-11:45 from 10 Oct. The first range stays in the event's own
+        // start/end/startDate/endDate so old data still reads; the rest go in
+        // `periods`.
 
-        // Coerce stored periods into a clean array (Firebase may hand back an
-        // array field as an object) and drop anything without times.
+        // Firebase may hand an array field back as an object; drop junk entries.
         function normalizePeriods(raw) {
             const list = Array.isArray(raw) ? raw : (raw && typeof raw === 'object' ? Object.values(raw) : []);
             return list
@@ -786,8 +808,8 @@
                 }));
         }
 
-        // Every time range an event carries, base first. Always fresh objects,
-        // so callers (the modal) can edit them without touching stored state.
+        // Every range an event carries, base first. Fresh objects, so the modal
+        // can edit them without touching stored state.
         function eventPeriods(event) {
             return [
                 {
@@ -800,13 +822,10 @@
             ];
         }
 
-        // Fill in blank times from the range above, so a later range can say
-        // "same times, new dates" — or move its start and leave the end to
-        // follow — by leaving a field empty. A blank end inherits the previous
-        // range's *length* rather than its end time, so pushing the start later
-        // can't collapse the range to nothing. Dates left blank stay blank:
-        // those mean open-ended. The first range has nothing to inherit from,
-        // so saving demands both its times.
+        // Blank times fall back to the range above: a blank start copies it, a
+        // blank end copies its length (not its end time, which a later start
+        // would collapse to nothing). Blank dates stay blank — those mean
+        // open-ended. Range 1 has nothing above it, so saving demands its times.
         function resolvePeriods(periods) {
             const resolved = [];
             periods.forEach((p, i) => {
@@ -865,8 +884,8 @@
         }
 
         function renderDayEvents(day, date = null) {
-            // Resolve each event to the time range in effect on this date; with no
-            // date to go on, fall back to its first range.
+            // Each event resolves to the range in effect on this date; with no
+            // date to go on, its first.
             const occurrences = (state.events[day] || [])
                 .map(ev => {
                     if (date) return occurrenceOn(ev, date);
@@ -1097,9 +1116,8 @@
             $('eventTitle').focus();
         }
 
-        // Render the editable list of time ranges. Rebuilt only on add/remove —
-        // typed edits write straight into state.editingPeriods so the field you
-        // are in never loses focus mid-edit.
+        // The editable list of time ranges. Rebuilt only on add/remove; typed
+        // edits go straight to state.editingPeriods so a field never loses focus.
         function renderPeriodsUI() {
             const many = state.editingPeriods.length > 1;
             $('periodList').innerHTML = state.editingPeriods.map((p, i) => `
@@ -1129,8 +1147,7 @@
             refreshPeriodHints();
         }
 
-        // Flag the range that applies to the occurrence the modal was opened
-        // from, so it's obvious which row governs the block you clicked.
+        // Flag the range governing the occurrence the modal was opened from.
         function refreshPeriodHints() {
             const cur = state.editingEventDate;
             const active = (cur && state.editingPeriods.length > 1)
@@ -1211,9 +1228,8 @@
 
             if (!event.title) { alert('Please enter an event title'); return; }
 
-            // Check the rows in the order they're shown, so the number in any
-            // complaint points at the row on screen — storage sorts them
-            // chronologically afterwards, which can reorder them.
+            // Check rows in displayed order so any complaint names the row on
+            // screen; storage sorts them chronologically afterwards.
             const ranges = resolvePeriods(state.editingPeriods);
             for (let i = 0; i < ranges.length; i++) {
                 const r = ranges[i];
@@ -1849,8 +1865,8 @@
             switch (format) {
                 case 'csv':
                     content = 'Day,Start,End,Title,Location,From Date,Until Date\n';
-                    // One row per time range, so a time that changes part-way
-                    // through the term exports as two dated rows.
+                    // One row per range: a time that changes part-way through the
+                    // term exports as two dated rows.
                     content += allEvents.flatMap(e => eventPeriods(e).map(p =>
                         `${e.day},${p.start},${p.end},"${e.title}","${e.location || ''}",${p.startDate || ''},${p.endDate || ''}`
                     )).join('\n');
