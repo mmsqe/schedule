@@ -139,7 +139,9 @@
             overflow: hidden;
             border-left: 4px solid;
             z-index: 2;
+            -webkit-user-select: none;
             user-select: none;
+            -webkit-touch-callout: none; /* no iOS long-press callout */
         }
 
         .event-block:hover {

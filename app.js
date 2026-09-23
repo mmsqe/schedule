@@ -1648,7 +1648,9 @@
             if (state.viewOnly) return;
             document.querySelectorAll('.event-block').forEach(block => {
                 block.addEventListener('mousedown', onEventMouseDown);
-                block.addEventListener('touchstart', onEventTouchStart, { passive: false });
+                block.addEventListener('touchstart', onEventTouchStart, { passive: true });
+                // Android's long-press menu would cancel the drag.
+                block.addEventListener('contextmenu', e => e.preventDefault());
             });
         }
 
@@ -1666,24 +1668,56 @@
             document.addEventListener('mouseup', onUp);
         }
 
+        // Touch: hold to drag. A slide scrolls the page; a tap opens the editor.
+        const LONG_PRESS_MS = 500;
+        const SCROLL_SLOP_PX = 10;
+
         function onEventTouchStart(e) {
-            if (state.viewOnly) return;
-            e.preventDefault();
-            const touch = e.touches[0];
-            beginDrag(e.currentTarget, touch.clientX, touch.clientY);
+            if (state.viewOnly || e.touches.length > 1) return;
+            const block = e.currentTarget;
+            const { clientX: startX, clientY: startY } = e.touches[0];
+            let x = startX, y = startY;
+            let dragging = false;
+
+            const timer = setTimeout(() => {
+                dragging = true;
+                beginDrag(block, x, y);
+                if (navigator.vibrate) navigator.vibrate(15);
+            }, LONG_PRESS_MS);
+
             const onMove = (ev) => {
+                // Second finger = pinch-zoom.
+                if (ev.touches.length > 1) { cleanup(); cancelDrag(); return; }
+                ({ clientX: x, clientY: y } = ev.touches[0]);
+                if (!dragging) {
+                    if (Math.abs(x - startX) > SCROLL_SLOP_PX || Math.abs(y - startY) > SCROLL_SLOP_PX) cleanup();
+                    return;
+                }
+                // Page is already scrolling; don't drag against it.
+                if (!ev.cancelable) { cleanup(); cancelDrag(); return; }
                 ev.preventDefault();
-                const t = ev.touches[0];
-                handleDragMove(t.clientX, t.clientY);
+                handleDragMove(x, y);
             };
             const onEnd = (ev) => {
-                document.removeEventListener('touchmove', onMove);
-                document.removeEventListener('touchend', onEnd);
+                cleanup();
+                if (!dragging) return;
                 const t = ev.changedTouches[0];
                 endDrag(t.clientX, t.clientY);
+                // Held and released in place: not a tap, so don't open the editor.
+                suppressNextClick = true;
+                setTimeout(() => suppressNextClick = false, 400);
             };
+            const onCancel = () => { cleanup(); cancelDrag(); };
+
+            function cleanup() {
+                clearTimeout(timer);
+                document.removeEventListener('touchmove', onMove);
+                document.removeEventListener('touchend', onEnd);
+                document.removeEventListener('touchcancel', onCancel);
+            }
             document.addEventListener('touchmove', onMove, { passive: false });
             document.addEventListener('touchend', onEnd);
+            document.addEventListener('touchcancel', onCancel);
         }
 
         function beginDrag(block, clientX, clientY) {
@@ -1751,21 +1785,25 @@
 
         function endDrag(clientX, clientY) {
             if (!dragState) return;
-            const { ghost, originalBlock, eventId, originalDay, durationMinutes, periodIndex, moved } = dragState;
-
-            ghost.remove();
-            originalBlock.classList.remove('dragging');
-            removeDropIndicator();
+            const { eventId, originalDay, durationMinutes, periodIndex, moved, offsetY } = dragState;
+            cancelDrag();
 
             if (moved) {
                 suppressNextClick = true;
                 setTimeout(() => suppressNextClick = false, 150);
-                const target = getDragTarget(clientX, clientY - dragState.offsetY);
+                const target = getDragTarget(clientX, clientY - offsetY);
                 if (target) {
                     moveEventByDrag(eventId, originalDay, target.day, target.absoluteMinutes, durationMinutes, periodIndex);
                 }
             }
+        }
 
+        // Put the dragged block back without moving anything.
+        function cancelDrag() {
+            if (!dragState) return;
+            dragState.ghost.remove();
+            dragState.originalBlock.classList.remove('dragging');
+            removeDropIndicator();
             dragState = null;
         }
 
