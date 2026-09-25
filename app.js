@@ -846,8 +846,7 @@
             return resolved;
         }
 
-        // Put ranges in chronological order (an open start counts as earliest),
-        // so "first match wins" below resolves overlaps predictably.
+        // Put ranges in chronological order (an open start counts as earliest).
         function sortPeriods(periods) {
             return periods.slice().sort((a, b) =>
                 (a.startDate || '').localeCompare(b.startDate || '') || a.start.localeCompare(b.start));
@@ -859,6 +858,22 @@
             return true;
         }
 
+        // Where ranges overlap, the most recent change wins: the later From,
+        // then the sooner Until, so a one-day override beats an open-ended range.
+        function outranks(a, b) {
+            if ((a.startDate || '') !== (b.startDate || '')) return (a.startDate || '') > (b.startDate || '');
+            return (a.endDate || '9999-12-31') < (b.endDate || '9999-12-31');
+        }
+
+        // Index of the range in effect on a YMD, or -1 if none covers it.
+        function activePeriodIndex(periods, ymd) {
+            let index = -1;
+            periods.forEach((p, i) => {
+                if (periodCoversDate(p, ymd) && (index === -1 || outranks(p, periods[index]))) index = i;
+            });
+            return index;
+        }
+
         // The event as it occurs on a date: its fields overlaid with the time
         // range in effect that day. null when the date is skipped or no range
         // covers it.
@@ -866,7 +881,7 @@
             const ymd = toYMD(date);
             if (event.excludeDates && event.excludeDates.includes(ymd)) return null;
             const periods = eventPeriods(event);
-            const index = periods.findIndex(p => periodCoversDate(p, ymd));
+            const index = activePeriodIndex(periods, ymd);
             if (index === -1) return null;
             return { ...event, ...periods[index], periodIndex: index, periodCount: periods.length };
         }
@@ -1151,7 +1166,7 @@
         function refreshPeriodHints() {
             const cur = state.editingEventDate;
             const active = (cur && state.editingPeriods.length > 1)
-                ? state.editingPeriods.findIndex(p => periodCoversDate(p, cur))
+                ? activePeriodIndex(state.editingPeriods, cur)
                 : -1;
             document.querySelectorAll('#periodList .period-current').forEach(el => {
                 el.style.display = Number(el.dataset.i) === active ? 'inline' : 'none';
