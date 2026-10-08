@@ -1355,12 +1355,13 @@
             shareModal.classList.add('active');
         }
 
-        // Write the current view + position onto a URLSearchParams (clearing any
-        // stale month/week/day first). Shared by the share links and the address
-        // bar so both describe exactly what's on screen.
-        function applyViewParams(p) {
+        // Write the current view onto a URLSearchParams, clearing any stale
+        // month/week/day. The position is added only for share links: in the
+        // address bar it would get bookmarked and keep reopening an old week.
+        function applyViewParams(p, withPosition = false) {
             p.set('view', state.view);
             p.delete('month'); p.delete('week'); p.delete('day');
+            if (!withPosition) return p;
             if (state.view === 'monthly') {
                 const y = state.monthDate.getFullYear();
                 const m = (state.monthDate.getMonth() + 1).toString().padStart(2, '0');
@@ -1374,12 +1375,12 @@
         }
 
         function currentViewParams() {
-            return '&' + applyViewParams(new URLSearchParams()).toString();
+            return '&' + applyViewParams(new URLSearchParams(), true).toString();
         }
 
-        // Mirror the current view/week (and room/key) into the address bar without
-        // adding history entries, so a refresh restores the same position instead
-        // of snapping back to today.
+        // Mirror the current view (and room/key) into the address bar without
+        // adding history entries, so a refresh or bookmark reopens the same view
+        // at today's date.
         function syncUrl() {
             const p = applyViewParams(new URLSearchParams(window.location.search));
             history.replaceState(null, '', window.location.pathname + '?' + p.toString());
